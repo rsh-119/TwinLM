@@ -4,6 +4,7 @@ import logging
 from fastapi import FastAPI
 
 from app.config import get_settings
+from app.database.database import init_db
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,4 +29,5 @@ async def health() -> dict:
 async def on_startup() -> None:
     # Touch settings once at startup so misconfiguration fails fast and loudly.
     get_settings()
+    init_db()
     logger.info("LLM Gateway started")
