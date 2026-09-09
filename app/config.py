@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     """
 
     gemini_api_key: str = ""
+    groq_api_key: str = ""
     openai_api_key: str = ""
 
     ollama_base_url: str = "http://localhost:11434"
