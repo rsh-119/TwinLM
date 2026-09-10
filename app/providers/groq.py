@@ -11,7 +11,7 @@ from app.config import get_settings
 from app.providers.base import RETRYABLE_STATUS_CODES, LLMProvider, ProviderUnavailableError
 
 GROQ_API_BASE = "https://api.groq.com/openai/v1"
-DEFAULT_GROQ_MODEL = "llama-3.1-8b-instant"
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
 
 
 class GroqProvider(LLMProvider):

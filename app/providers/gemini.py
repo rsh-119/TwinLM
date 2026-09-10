@@ -13,7 +13,7 @@ from app.config import get_settings
 from app.providers.base import RETRYABLE_STATUS_CODES, LLMProvider, ProviderUnavailableError
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
-DEFAULT_GEMINI_MODEL = "gemini-1.5-flash"
+DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
 
 # Gemini calls the assistant role "model" instead of "assistant".
 _ROLE_MAP = {"user": "user", "assistant": "model"}
