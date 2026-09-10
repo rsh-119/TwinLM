@@ -86,3 +86,33 @@ class ConversationManager:
         """
         conversation = self.get_conversation(conversation_id)
         return conversation.summary or ""
+
+    def update_summary(self, conversation_id: str, summary: str) -> Conversation:
+        """Overwrite a conversation's stored summary.
+
+        Raises:
+            ConversationNotFoundError: if the conversation doesn't exist.
+        """
+        conversation = repository.update_conversation_summary(self._db, conversation_id, summary)
+        if conversation is None:
+            raise ConversationNotFoundError(conversation_id)
+        return conversation
+
+    def get_message_count(self, conversation_id: str) -> int:
+        """Return how many messages are stored for a conversation.
+
+        Raises:
+            ConversationNotFoundError: if the conversation doesn't exist.
+        """
+        self.get_conversation(conversation_id)
+        return repository.count_messages(self._db, conversation_id)
+
+    def get_all_messages(self, conversation_id: str) -> Sequence[Message]:
+        """Return every stored message for a conversation, oldest first.
+
+        Used for summarization, which needs the full history rather than
+        just the recent window. Raises ConversationNotFoundError if the
+        conversation doesn't exist.
+        """
+        self.get_conversation(conversation_id)
+        return repository.get_messages(self._db, conversation_id)
