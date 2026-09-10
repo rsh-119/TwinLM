@@ -1,18 +1,3 @@
-"""CLI demo: shows the gateway's core idea end-to-end.
-
-Creates a conversation, sends a couple of messages through normal "auto"
-routing, simulates the primary provider going down mid-conversation, and
-shows that the fallback provider answers using the same preserved context -
-all without the user ever resending earlier messages.
-
-This calls the real FastAPI app in-process (no separate server needed) and
-uses your real provider credentials from .env, so it makes real network
-calls to whichever providers you have configured.
-
-Run from the repo root:
-
-    python scripts/demo.py
-"""
 import sys
 from pathlib import Path
 
@@ -44,7 +29,7 @@ def send(client: TestClient, conversation_id: str, message: str, model: str = "a
 
 def main() -> None:
     print("=" * 70)
-    print("LLM Gateway demo")
+    print("TwinLM demo")
     print("=" * 70)
 
     with TestClient(app) as client:

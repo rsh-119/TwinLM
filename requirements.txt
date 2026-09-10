@@ -5,5 +5,10 @@ pydantic-settings
 sqlalchemy
 httpx
 python-dotenv
+jinja2
+python-multipart
+markdown
+nh3
+pygments
 pytest
 pytest-asyncio

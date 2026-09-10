@@ -1,13 +1,9 @@
-"""Shared pytest fixtures.
-
-Every test gets a fresh, isolated in-memory SQLite database and fake
-providers - nothing here touches a real database file or needs real
-provider API keys.
-"""
+"""Shared pytest fixtures - isolated in-memory DB and fake providers, so
+tests never touch a real database or need real API keys."""
 import os
 
-# Set before anything imports app.* so the app's own module-level engine
-# (used only by the startup event in tests) never touches a real db file.
+# has to happen before anything imports app.*, so the app's own engine
+# (only used by the startup event during tests) doesn't touch a real db file
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
 import pytest
@@ -21,20 +17,25 @@ from app.providers.base import LLMProvider, ProviderUnavailableError
 
 
 class FakeProvider(LLMProvider):
-    """A configurable stand-in for a real provider, used in tests only.
+    """Stand-in for a real provider. `behavior` is "ok" (returns `reply`),
+    "unavailable" (raises ProviderUnavailableError), "error" (raises a
+    plain ValueError, like a normal client error that shouldn't fall back),
+    or "unavailable_mid_stream" (streaming only - yields `chunks`, then
+    raises ProviderUnavailableError, simulating a connection that drops
+    partway through a reply instead of failing to connect at all).
 
-    `behavior` controls what `generate()` does:
-      - "ok": returns `reply`.
-      - "unavailable": raises ProviderUnavailableError (retryable failure).
-      - "error": raises a plain ValueError (a normal client error that
-        should never trigger fallback).
+    `chunks`, if given, is what `generate_stream` yields piece by piece
+    instead of `reply` as one chunk - lets a test assert on streaming
+    granularity without needing a real provider.
     """
 
-    def __init__(self, name: str, behavior: str = "ok", reply: str = "canned reply"):
+    def __init__(self, name: str, behavior: str = "ok", reply: str = "canned reply", chunks=None):
         self.name = name
         self.behavior = behavior
         self.reply = reply
+        self.chunks = chunks
         self.calls = 0
+        self.stream_calls = 0
 
     async def generate(self, messages, model):
         self.calls += 1
@@ -46,15 +47,26 @@ class FakeProvider(LLMProvider):
             raise ValueError(f"{self.name} bad request")
         raise AssertionError(f"unknown behavior: {self.behavior}")
 
+    async def generate_stream(self, messages, model):
+        self.stream_calls += 1
+        if self.behavior == "unavailable":
+            raise ProviderUnavailableError(f"{self.name} unavailable")
+        if self.behavior == "error":
+            raise ValueError(f"{self.name} bad request")
+        if self.behavior in ("ok", "unavailable_mid_stream"):
+            for chunk in self.chunks or [self.reply]:
+                yield chunk
+            if self.behavior == "unavailable_mid_stream":
+                raise ProviderUnavailableError(f"{self.name} dropped mid-stream")
+            return
+        raise AssertionError(f"unknown behavior: {self.behavior}")
+
 
 @pytest.fixture
 def sqlite_engine():
-    """A fresh in-memory SQLite engine with all tables created.
-
-    Uses a single shared connection (StaticPool) so the same in-memory
-    database is visible across every session opened from this engine -
-    otherwise each connection would see a separate, empty database.
-    """
+    """Fresh in-memory SQLite engine with all tables created. StaticPool
+    keeps one shared connection so every session sees the same data -
+    otherwise each connection would get its own empty in-memory db."""
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -77,11 +89,8 @@ def db_session(sqlite_engine):
 
 @pytest.fixture
 def fake_providers():
-    """Two fake providers (gemini, groq), both healthy by default.
-
-    Tests can mutate `.behavior` on either one before making a request to
-    simulate an outage.
-    """
+    """gemini + groq, both healthy by default - mutate `.behavior` to
+    simulate an outage."""
     return {
         "gemini": FakeProvider("gemini", behavior="ok", reply="hello from gemini"),
         "groq": FakeProvider("groq", behavior="ok", reply="hello from groq"),

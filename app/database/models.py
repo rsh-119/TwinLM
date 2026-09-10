@@ -1,9 +1,4 @@
-"""SQLAlchemy ORM models: conversations, messages, and user memories.
-
-The conversation is owned by the gateway, not by any LLM provider - a
-`Conversation` has many `Message` rows regardless of which provider produced
-each one. See `app/memory/` for the logic that uses these tables.
-"""
+"""SQLAlchemy ORM models: conversations, messages, and user memories."""
 import uuid
 from datetime import datetime, timezone
 

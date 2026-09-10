@@ -1,10 +1,4 @@
-"""Conversation endpoints: create a conversation and read it back.
-
-These exist alongside the chat endpoint (not as a separately numbered
-build step) because the chat flow requires a conversation to already
-exist - a client always creates one here first, then sends turns to
-/v1/chat/completions using its id.
-"""
+"""Conversation endpoints: create a conversation and read it back."""
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -71,16 +65,22 @@ def get_conversation(conversation_id: str, db: Session = Depends(get_db)) -> Con
     )
 
 
+@router.delete("/{conversation_id}", status_code=204, response_model=None)
+def delete_conversation(conversation_id: str, db: Session = Depends(get_db)) -> None:
+    """Permanently delete a conversation and all of its messages."""
+    manager = ConversationManager(db)
+    try:
+        manager.delete_conversation(conversation_id)
+    except ConversationNotFoundError:
+        raise HTTPException(status_code=404, detail="conversation not found")
+
+
 @router.get("/{conversation_id}/messages", response_model=List[MessageResponse])
 def get_conversation_messages(
     conversation_id: str, db: Session = Depends(get_db)
 ) -> List[MessageResponse]:
-    """Fetch the full stored message history for a conversation, oldest first.
-
-    Unlike the context the gateway sends to a provider, this is not limited
-    to the most recent messages - it's meant for inspecting/debugging a
-    conversation in full.
-    """
+    """Full stored history, oldest first - not limited like the context sent
+    to a provider."""
     manager = ConversationManager(db)
     try:
         manager.get_conversation(conversation_id)

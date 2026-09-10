@@ -1,20 +1,11 @@
-"""Application configuration loaded from environment variables.
-
-All settings are read once at import time via ``get_settings()``. Keeping
-configuration in a single place means no other module ever reads
-``os.environ`` directly, and API keys never end up hardcoded in source.
-"""
+"""App settings, loaded from environment variables / .env."""
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Typed application settings.
-
-    Values are loaded from a ``.env`` file (if present) and from the real
-    environment, which always takes precedence.
-    """
+    """Env vars override .env, which overrides these defaults."""
 
     gemini_api_key: str = ""
     groq_api_key: str = ""
@@ -24,12 +15,11 @@ class Settings(BaseSettings):
 
     default_model: str = "auto"
 
-    database_url: str = "sqlite:///./llm_gateway.db"
+    database_url: str = "sqlite:///./twinlm.db"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """Return the cached application settings singleton."""
     return Settings()

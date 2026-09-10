@@ -1,11 +1,6 @@
-"""Gemini provider adapter.
-
-Converts the gateway's internal message format into Gemini's
-`generateContent` request shape, and converts the response back into plain
-text. This is the only file in the project that knows what a Gemini request
-looks like.
-"""
-from typing import Dict, List, Optional
+"""Gemini provider adapter - converts to/from Gemini's generateContent shape."""
+import json
+from typing import AsyncIterator, Dict, List, Optional
 
 import httpx
 
@@ -54,10 +49,43 @@ class GeminiProvider(LLMProvider):
 
         return self._extract_text(response.json())
 
+    async def generate_stream(self, messages: List[Dict[str, str]], model: str) -> AsyncIterator[str]:
+        """Call Gemini's streamGenerateContent endpoint (SSE) and yield the
+        reply text as it arrives."""
+        if not self._api_key:
+            raise ProviderUnavailableError("gemini api key is not configured")
+
+        model = model or DEFAULT_GEMINI_MODEL
+        system_instruction, contents = self._to_gemini_messages(messages)
+
+        payload: Dict[str, object] = {"contents": contents}
+        if system_instruction:
+            payload["system_instruction"] = {"parts": [{"text": system_instruction}]}
+
+        url = f"{self._base_url}/models/{model}:streamGenerateContent"
+        params = {"key": self._api_key, "alt": "sse"}
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                async with client.stream("POST", url, params=params, json=payload) as response:
+                    if response.status_code in RETRYABLE_STATUS_CODES:
+                        raise ProviderUnavailableError(f"gemini returned status {response.status_code}")
+                    response.raise_for_status()
+
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        data = line[len("data:"):].strip()
+                        if not data:
+                            continue
+                        for text in self._extract_stream_text(json.loads(data)):
+                            yield text
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError) as exc:
+            raise ProviderUnavailableError(f"gemini connection error: {exc}") from exc
+
     @staticmethod
     def _to_gemini_messages(messages: List[Dict[str, str]]):
-        """Split out system messages (Gemini takes those separately) and map
-        the rest onto Gemini's `contents` shape."""
+        """Split out system messages and map the rest to Gemini's `contents` shape."""
         system_parts = [m["content"] for m in messages if m["role"] == "system"]
         system_instruction = "\n\n".join(system_parts)
 
@@ -75,3 +103,14 @@ class GeminiProvider(LLMProvider):
             return "".join(part.get("text", "") for part in parts)
         except (KeyError, IndexError) as exc:
             raise ProviderUnavailableError(f"unexpected gemini response shape: {exc}") from exc
+
+    @staticmethod
+    def _extract_stream_text(chunk: Dict) -> List[str]:
+        """Same shape as `_extract_text`, but tolerant of the odd stream
+        event that carries no candidate (e.g. one that only sets
+        `promptFeedback`) - skip it instead of failing the whole stream."""
+        candidates = chunk.get("candidates") or []
+        if not candidates:
+            return []
+        parts = (candidates[0].get("content") or {}).get("parts", [])
+        return [part.get("text", "") for part in parts if part.get("text")]

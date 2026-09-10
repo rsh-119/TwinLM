@@ -1,9 +1,5 @@
-"""User memory endpoints: simple long-term facts remembered per user.
-
-No embeddings or semantic search in V1 - just a flat list of facts per
-user, included verbatim in every conversation's context (see
-`app/memory/context_builder.py` and how `app/api/chat.py` loads them).
-"""
+"""User memory endpoints - a flat list of facts per user, no embeddings or
+semantic search. See app/memory/context_builder.py for how these get used."""
 from typing import List
 
 from fastapi import APIRouter, Depends

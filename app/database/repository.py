@@ -1,10 +1,4 @@
-"""Plain CRUD operations against the database.
-
-This module contains no business rules (no summarization thresholds, no
-message-limit logic, no provider awareness) - that belongs in
-`app/memory/conversation_manager.py`. Keeping the two separate means the
-database layer can be tested and reasoned about on its own.
-"""
+"""Plain CRUD operations against the database - no business rules live here."""
 from typing import Optional, Sequence
 
 from sqlalchemy.orm import Session
@@ -24,6 +18,26 @@ def create_conversation(db: Session, user_id: str) -> Conversation:
 def get_conversation(db: Session, conversation_id: str) -> Optional[Conversation]:
     """Fetch a conversation by id, or None if it doesn't exist."""
     return db.get(Conversation, conversation_id)
+
+
+def get_conversations_by_user(db: Session, user_id: str) -> Sequence[Conversation]:
+    """Return a user's conversations, most recently created first."""
+    return (
+        db.query(Conversation)
+        .filter(Conversation.user_id == user_id)
+        .order_by(Conversation.created_at.desc())
+        .all()
+    )
+
+
+def delete_conversation(db: Session, conversation_id: str) -> bool:
+    """Delete a conversation and its messages. Returns False if it didn't exist."""
+    conversation = db.get(Conversation, conversation_id)
+    if conversation is None:
+        return False
+    db.delete(conversation)
+    db.commit()
+    return True
 
 
 def update_conversation_summary(
@@ -57,11 +71,8 @@ def add_message(
 def get_messages(
     db: Session, conversation_id: str, limit: Optional[int] = None
 ) -> Sequence[Message]:
-    """Return a conversation's messages in chronological order.
-
-    If `limit` is given, only the most recent `limit` messages are returned
-    (still in chronological order).
-    """
+    """Return a conversation's messages in chronological order, optionally
+    limited to the most recent `limit` of them."""
     messages = (
         db.query(Message)
         .filter(Message.conversation_id == conversation_id)
@@ -71,6 +82,17 @@ def get_messages(
     if limit is not None and len(messages) > limit:
         return messages[-limit:]
     return messages
+
+
+def get_first_message(db: Session, conversation_id: str) -> Optional[Message]:
+    """Return a conversation's earliest message, if any - used to label it
+    in the UI sidebar without loading the whole conversation."""
+    return (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.asc())
+        .first()
+    )
 
 
 def count_messages(db: Session, conversation_id: str) -> int:
