@@ -1,0 +1,42 @@
+# TLS ingress for shared access (compose profile `ingress`).
+#
+# Real domains get Let's Encrypt certificates automatically: point DNS for
+# TWINLM_DOMAIN, CONSOLE_DOMAIN and GRAFANA_DOMAIN at this host and open
+# ports 80/443. The *.localhost defaults use Caddy's internal CA (local test).
+#
+# - API host: only /v1/* is proxied; every call needs a gateway API key.
+#   /admin, /metrics and /docs are never exposed here - operators use the
+#   console or an SSH tunnel to 127.0.0.1:8000.
+# - Console and Grafana hosts: HTTP basic auth (user CONSOLE_USER, password
+#   in the `console_password` secret) in front of operator UIs.
+
+{
+	# email ops@example.com   # set for certificate expiry notices
+}
+
+{$TWINLM_DOMAIN} {
+	encode gzip
+	handle /v1/* {
+		reverse_proxy gateway:8000
+	}
+	handle {
+		respond "not found" 404
+	}
+	header -Server
+}
+
+{$CONSOLE_DOMAIN} {
+	basic_auth {
+		{$CONSOLE_USER} {$CONSOLE_PASSWORD_HASH}
+	}
+	reverse_proxy ui:8501
+	header -Server
+}
+
+{$GRAFANA_DOMAIN} {
+	basic_auth {
+		{$CONSOLE_USER} {$CONSOLE_PASSWORD_HASH}
+	}
+	reverse_proxy grafana:3000
+	header -Server
+}

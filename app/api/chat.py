@@ -1,31 +1,52 @@
-"""Chat completions endpoint: load conversation -> build context -> route
-to a provider (auto-fallback if needed) -> store the exchange -> respond.
+"""Chat completions endpoint.
 
-`body.stream=True` swaps the last two steps for their streaming
-equivalents (see `stream_chat_turn` below) and the response for one
-Server-Sent Events - same request shape, same fallback rules, just
-delivered incrementally instead of as one JSON blob. That's also what
-powers the web UI's live "typing" effect (app/web/routes.py).
+Pipeline, in order:
+
+    admit (model allow-list, rate limits, budget)
+    -> input guardrails
+    -> build context (stateful: conversation memory; stateless: as sent)
+    -> cache lookup (stateless, non-streaming, nothing sensitive)
+    -> route (registry, retries, circuit breakers, fallback)
+    -> structured-output validation + bounded repair (response_format)
+    -> output guardrails
+    -> persist the exchange (stateful) / fill the cache (stateless)
+    -> accounting (request log, metrics, TPM) - on every path, via finally
+
+`body.stream=True` runs the same pipeline incrementally (`stream_chat_turn`)
+and answers with Server-Sent Events. That also powers the web UI's live
+"typing" effect (app/web/routes.py).
 """
+import asyncio
 import json
 import logging
 import time
-import uuid
-from typing import AsyncIterator, List, Optional, Union
+from contextlib import aclosing
+from typing import AsyncIterator, Dict, List, Optional, Tuple, Union
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.api import stateful
+from app.api.common import GatewayServices, admit, get_services, provider_errors
+from app.auth import Principal, authenticate
 from app.database import repository
-from app.database.database import get_db
+from app.database.database import get_db, release_connection
 from app.database.models import Conversation
-from app.memory.context_builder import build_context
-from app.memory.conversation_manager import ConversationManager, ConversationNotFoundError
-from app.memory.summarizer import should_summarize, summarize_conversation
-from app.providers.base import ProviderUnavailableError
-from app.router.model_router import ModelRouter, NoProviderAvailableError, RouteChunk, get_model_router
-from app.schemas.chat import ChatCompletionRequest, ChatCompletionResponse, ChatResponseMessage
+from app.gateway import structured
+from app.gateway.guardrails import GuardrailViolation
+from app.gateway.usage import UsageRecord, finish
+from app.memory.conversation_manager import ConversationManager
+from app.observability import CACHE_HITS, CACHE_MISSES, STRUCTURED_OUTPUT_FAILURES, current_request_id
+from app.providers.base import TokenUsage
+from app.router.model_router import ModelRouter, RouteChunk, RouteResult, get_model_router
+from app.schemas.chat import (
+    ChatChoice,
+    ChatCompletionRequest,
+    ChatCompletionResponse,
+    ChatResponseMessage,
+    TokenUsageOut,
+)
 
 logger = logging.getLogger("twinlm.api.chat")
 
@@ -35,176 +56,408 @@ router = APIRouter(prefix="/v1", tags=["chat"])
 @router.post("/chat/completions", response_model=ChatCompletionResponse)
 async def chat_completions(
     body: ChatCompletionRequest,
+    response: Response = None,  # type: ignore[assignment] - FastAPI injects it
     db: Session = Depends(get_db),
     model_router: ModelRouter = Depends(get_model_router),
+    principal: Optional[Principal] = Depends(authenticate),
+    services: GatewayServices = Depends(get_services),
 ) -> Union[ChatCompletionResponse, StreamingResponse]:
     if body.stream:
-        return await _stream_chat_completions(body, db, model_router)
+        return await _stream_chat_completions(body, db, model_router, principal, services)
 
-    request_id = f"req_{uuid.uuid4().hex[:12]}"
-    manager = ConversationManager(db)
-    conversation = _get_conversation_or_404(manager, body.conversation_id)
-
-    user_message = _latest_user_message(body)
-    if user_message is None:
-        raise HTTPException(
-            status_code=400, detail="messages must include at least one user message"
-        )
-
-    context_messages = _load_context_messages(manager, db, conversation, user_message)
-
-    # fallback (if any) happens inside the router for model="auto"
-    started = time.monotonic()
+    record = UsageRecord(
+        current_request_id(), "chat", body.model, principal=principal, conversation_id=body.conversation_id
+    )
     try:
-        result = await model_router.route(body.model, context_messages)
-    except ValueError as exc:
-        logger.warning(
-            "request_id=%s conversation_id=%s status=invalid_request error=%s",
-            request_id, conversation.id, exc,
-        )
-        raise HTTPException(status_code=400, detail=str(exc))
-    except (ProviderUnavailableError, NoProviderAvailableError):
-        latency_ms = int((time.monotonic() - started) * 1000)
-        logger.error(
-            "request_id=%s conversation_id=%s model=%s latency=%dms status=unavailable",
-            request_id, conversation.id, body.model, latency_ms,
-        )
-        raise HTTPException(status_code=503, detail="all providers are currently unavailable")
-    except Exception:  # noqa: BLE001
-        latency_ms = int((time.monotonic() - started) * 1000)
-        logger.exception(
-            "request_id=%s conversation_id=%s model=%s latency=%dms status=error",
-            request_id, conversation.id, body.model, latency_ms,
-        )
-        raise HTTPException(status_code=502, detail="upstream provider error")
+        return await _complete(body, response, db, model_router, principal, services, record)
+    except HTTPException as exc:
+        if record.status == "success":
+            record.fail(exc.status_code, str(exc.detail))
+        raise
+    except Exception as exc:
+        record.fail(500, f"internal error: {type(exc).__name__}")
+        raise
+    finally:
+        finish(db, record, services.config.pricing, services.limiter, services.usage_writer)
 
-    latency_ms = int((time.monotonic() - started) * 1000)
-    logger.info(
-        "request_id=%s conversation_id=%s provider=%s model=%s latency=%dms status=success",
-        request_id, conversation.id, result.provider, result.model, latency_ms,
+
+async def _complete(
+    body: ChatCompletionRequest,
+    response: Optional[Response],
+    db: Session,
+    model_router: ModelRouter,
+    principal: Optional[Principal],
+    services: GatewayServices,
+    record: UsageRecord,
+) -> ChatCompletionResponse:
+    _reject_unsupported(body)
+    _check_request_metadata(body, services, record)
+    validator, json_mode = _structured_output(body)
+    admit(body.model, principal, services, db, record)
+
+    manager, conversation, user_message, messages = _prepare_turn(body, db, principal, services, record)
+    params = _checked_generation_params(body, services, record)
+
+    cache_key = None
+    cache_ttl = services.config.cache_ttl(body.model)
+    cacheable = (
+        services.config.cache.enabled and conversation is None and cache_ttl != 0
+        and not params.get("temperature")  # sampled replies are meant to vary
     )
+    if cacheable and not services.guardrails.contains_sensitive(messages):
+        cache_key = services.cache.make_key(
+            model=body.model,
+            messages=messages,
+            params=params,
+            response_format=body.response_format.model_dump(by_alias=True) if body.response_format else None,
+            project=principal.project if principal else None,
+        )
+        cached: Optional[RouteResult] = services.cache.get(cache_key)
+        if response is not None:
+            response.headers["X-Cache"] = "HIT" if cached else "MISS"
+        if cached is not None:
+            CACHE_HITS.inc()
+            record.provider, record.model, record.usage, record.deployment, record.cache_hit = (
+                cached.provider, cached.model, cached.usage, cached.deployment, True,
+            )
+            return _response(record, cached.content, cached.tool_calls, cached.finish_reason)
+        CACHE_MISSES.inc()
 
-    manager.save_message(conversation.id, "user", user_message)
-    manager.save_message(conversation.id, "assistant", result.content, model=result.provider)
+    if json_mode:
+        messages = [{"role": "system", "content": structured.instruction(validator.schema if validator else None)}, *messages]
 
-    await _maybe_summarize(manager, model_router, conversation.id, request_id)
+    release_connection(db)
+    with provider_errors(record):
+        async with asyncio.timeout(services.config.request_timeout_seconds):
+            result = await model_router.route(body.model, messages, params)
+            record.served_by(result)
+            content, usage = result.content, result.usage
+            if json_mode and not result.tool_calls:
+                content, usage = await _enforce_structure(
+                    body, model_router, messages, params, validator, content, usage, services, record
+                )
+                record.usage = usage
 
+    output_sensitive = services.guardrails.contains_sensitive([
+        {"role": "assistant", "content": content, "tool_calls": result.tool_calls}
+    ])
+    try:
+        content = services.guardrails.check_output(content)
+    except GuardrailViolation as exc:
+        record.fail(502, str(exc), "blocked")
+        raise HTTPException(status_code=502, detail="response blocked by output guardrail")
+
+    if json_mode and not result.tool_calls:
+        content, error = structured.parse_and_validate(content, validator)
+        if content is None:
+            record.fail(502, f"output guardrail invalidated structured response: {error}")
+            raise HTTPException(status_code=502, detail="output guardrail invalidated structured response")
+
+    if conversation is not None:
+        try:
+            manager.save_exchange(conversation.id, conversation.version, user_message, content, result.provider, usage)
+        except repository.ConversationConflictError:
+            record.fail(409, "conversation changed during generation", "conflict")
+            raise HTTPException(status_code=409, detail="conversation changed during generation; retry the turn")
+        await stateful.maybe_summarize(manager, model_router, conversation.id, body.model, principal, services)
+    elif cache_key is not None and not output_sensitive and not result.tool_calls:
+        services.cache.set(cache_key, result._replace(content=content, usage=usage), cache_ttl)
+
+    return _response(record, content, result.tool_calls, result.finish_reason)
+
+
+def _response(
+    record: UsageRecord,
+    content: str,
+    tool_calls: Optional[List[dict]] = None,
+    finish_reason: Optional[str] = None,
+) -> ChatCompletionResponse:
+    # OpenAI sends null content on a tool-calls-only turn
+    message = ChatResponseMessage(content=(content or None) if tool_calls else content, tool_calls=tool_calls)
+    finish_reason = finish_reason or ("tool_calls" if tool_calls else "stop")
     return ChatCompletionResponse(
-        id=request_id,
-        conversation_id=conversation.id,
-        model=result.model,
-        provider=result.provider,
-        message=ChatResponseMessage(content=result.content),
+        id=record.request_id,
+        created=int(time.time()),
+        conversation_id=record.conversation_id,
+        model=record.model,
+        provider=record.provider,
+        choices=[ChatChoice(message=message, finish_reason=finish_reason)],
+        message=message,
+        usage=TokenUsageOut(**record.usage._asdict()) if record.usage else None,
     )
+
+
+def _reject_unsupported(body: ChatCompletionRequest) -> None:
+    """400 for what the gateway would otherwise silently get wrong."""
+    if body.n is not None and body.n > 1:
+        raise HTTPException(status_code=400, detail="n > 1 is not supported")
+    if body.conversation_id is None:
+        return
+    if body.tools or body.tool_choice:
+        raise HTTPException(status_code=400, detail="tools are only supported in stateless mode")
+    if any(isinstance(m.content, list) and any(p.type != "text" for p in m.content) for m in body.messages):
+        raise HTTPException(status_code=400, detail="image content is only supported in stateless mode")
+
+
+def _structured_output(body: ChatCompletionRequest):
+    """(validator or None, whether JSON output is required)."""
+    fmt = body.response_format
+    if fmt is None or fmt.type == "text":
+        return None, False
+    if body.stream:
+        raise HTTPException(status_code=400, detail="response_format is not supported with stream=true")
+    if fmt.type == "json_schema":
+        if fmt.json_schema is None:
+            raise HTTPException(status_code=400, detail="response_format.json_schema is required")
+        try:
+            return structured.validator_for(fmt.json_schema.schema_), True
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    return None, True
+
+
+async def _enforce_structure(
+    body: ChatCompletionRequest,
+    model_router: ModelRouter,
+    messages: List[Dict[str, str]],
+    params: dict,
+    validator,
+    content: str,
+    usage: Optional[TokenUsage],
+    services: GatewayServices,
+    record: UsageRecord,
+) -> Tuple[str, Optional[TokenUsage]]:
+    repairs = 0
+    while True:
+        normalized, error = structured.parse_and_validate(content, validator)
+        if normalized is not None:
+            return normalized, usage
+        STRUCTURED_OUTPUT_FAILURES.inc()
+        logger.warning("structured output invalid: attempt=%d error=%s", repairs + 1, error)
+        if repairs >= services.config.structured_output.max_repair_attempts:
+            record.fail(502, f"structured output validation failed: {error}")
+            raise HTTPException(status_code=502, detail=f"model output failed validation: {error}")
+        repairs += 1
+        messages = [*messages, {"role": "assistant", "content": content}, structured.repair_message(error)]
+        with provider_errors(record):
+            result = await model_router.route(body.model, messages, params)
+        record.bill(result.provider, result.model, result.usage)
+        content = result.content
+        usage = _add_usage(usage, result.usage)
+
+
+def _add_usage(a: Optional[TokenUsage], b: Optional[TokenUsage]) -> Optional[TokenUsage]:
+    if a is None or b is None:
+        return a or b
+    return TokenUsage(*(x + y for x, y in zip(a, b)))
 
 
 async def _stream_chat_completions(
-    body: ChatCompletionRequest, db: Session, model_router: ModelRouter
+    body: ChatCompletionRequest,
+    db: Session,
+    model_router: ModelRouter,
+    principal: Optional[Principal],
+    services: GatewayServices,
 ) -> StreamingResponse:
-    """The `"stream": true` branch of `/chat/completions` - same request,
-    but the reply comes back as SSE (`data: {"provider", "model", "delta",
-    "done"}` lines) instead of one JSON body. All the actual work is
-    `stream_chat_turn`; this just primes it (see `prime_stream`) so a setup
-    failure still turns into a normal 400/404/503, then formats the rest
-    of the chunks onto the wire.
+    """The `"stream": true` branch. Each SSE event is an OpenAI
+    `chat.completion.chunk` that also carries TwinLM's original
+    `provider`/`delta`/`done` fields, so both kinds of client can read it.
+    Stateless (OpenAI-style) requests end with OpenAI's `data: [DONE]`
+    sentinel; stateful ones don't, since existing clients parse every
+    `data:` line as JSON.
+
+    All the actual work is `stream_chat_turn`; this just primes it (see
+    `prime_stream`) so a setup failure still turns into a normal
+    400/404/429/503, then formats the rest of the chunks onto the wire.
     """
-    chunks = await prime_stream(stream_chat_turn(body, db, model_router))
+    request_id = current_request_id()
+    created = int(time.time())
+    chunks = await prime_stream(
+        stream_chat_turn(body, db, model_router, request_id=request_id, principal=principal, services=services)
+    )
+    include_usage = bool(body.stream_options and body.stream_options.include_usage)
 
     async def _sse() -> AsyncIterator[str]:
-        async for chunk in chunks:
+        first = True
+        model, usage = body.model, None
+        interrupted = False
+        async with aclosing(chunks):
+            async for chunk in chunks:
+                delta = {"role": "assistant"} if first else {}
+                if chunk.delta:
+                    delta["content"] = chunk.delta
+                if chunk.tool_calls:
+                    delta["tool_calls"] = chunk.tool_calls
+                first = False
+                model = chunk.model
+                interrupted = chunk.interrupted
+                finish_reason = (chunk.finish_reason or "stop") if chunk.done else None
+                payload = {
+                    "id": request_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": chunk.model,
+                    "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
+                    "provider": chunk.provider,
+                    "delta": chunk.delta,
+                    "done": chunk.done,
+                }
+                if chunk.interrupted:
+                    payload["interrupted"] = True
+                if chunk.usage:
+                    usage = payload["usage"] = chunk.usage._asdict()
+                yield f"data: {json.dumps(payload)}\n\n"
+        if interrupted:
+            yield 'event: error\ndata: {"error":{"message":"stream interrupted","type":"upstream_error"}}\n\n'
+            return
+        if include_usage:
+            # OpenAI's stream_options.include_usage: a last, choice-less chunk
             payload = {
-                "provider": chunk.provider,
-                "model": chunk.model,
-                "delta": chunk.delta,
-                "done": chunk.done,
+                "id": request_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [],
+                "usage": usage,
             }
             yield f"data: {json.dumps(payload)}\n\n"
+        if body.conversation_id is None:
+            yield "data: [DONE]\n\n"
 
     return StreamingResponse(_sse(), media_type="text/event-stream")
 
 
 async def stream_chat_turn(
-    body: ChatCompletionRequest, db: Session, model_router: ModelRouter
+    body: ChatCompletionRequest,
+    db: Session,
+    model_router: ModelRouter,
+    request_id: Optional[str] = None,
+    principal: Optional[Principal] = None,
+    services: Optional[GatewayServices] = None,
 ) -> AsyncIterator[RouteChunk]:
-    """Streaming counterpart to the body of `chat_completions` above -
-    shared by the JSON SSE branch and the web UI's own streaming endpoint
-    (app/web/routes.py), which reuses this and re-renders each chunk as
-    markdown instead of sending raw text.
+    """Streaming counterpart to `chat_completions` - shared by the JSON SSE
+    branch and the web UI's streaming endpoint (app/web/routes.py).
 
-    Builds context exactly the same way, streams the reply from the
-    router chunk by chunk, and once the stream ends, persists the
-    exchange and runs best-effort summarization - the same bookkeeping
-    `chat_completions` does after its one blocking call.
+    Setup failures (admission, unknown conversation, guardrails, no
+    reachable provider) raise HTTPException on the *first* item this
+    yields, before anything has gone out over the wire - see
+    `prime_stream`, which every caller should route through for that
+    reason. A failure after that point can't change the response anymore
+    (the 200 status is already on its way), so it's logged and the stream
+    just ends.
 
-    Setup failures (unknown conversation, no user message, no reachable
-    provider) raise HTTPException on the *first* item this yields, before
-    anything has gone out over the wire - see `prime_stream`, which every
-    caller should route through for that reason. A failure after that
-    point can't change the response anymore, so it's logged instead.
+    If the client disconnects, the generator is closed: the router tears
+    down the upstream request, the request is accounted as
+    `client_disconnected`, and the partial reply is *not* saved to the
+    conversation.
     """
-    request_id = f"req_{uuid.uuid4().hex[:12]}"
-    manager = ConversationManager(db)
-    conversation = _get_conversation_or_404(manager, body.conversation_id)
-
-    user_message = _latest_user_message(body)
-    if user_message is None:
-        raise HTTPException(
-            status_code=400, detail="messages must include at least one user message"
-        )
-
-    context_messages = _load_context_messages(manager, db, conversation, user_message)
-
-    started = time.monotonic()
-    collected: List[str] = []
-    final_provider: Optional[str] = None
-    final_model: Optional[str] = None
-
-    try:
-        async for chunk in model_router.route_stream(body.model, context_messages):
-            if chunk.delta:
-                collected.append(chunk.delta)
-            if chunk.done:
-                final_provider, final_model = chunk.provider, chunk.model
-            yield chunk
-    except ValueError as exc:
-        # only reachable before the first chunk - see ModelRouter.route_stream
-        logger.warning(
-            "request_id=%s conversation_id=%s status=invalid_request error=%s",
-            request_id, conversation.id, exc,
-        )
-        raise HTTPException(status_code=400, detail=str(exc))
-    except (ProviderUnavailableError, NoProviderAvailableError):
-        # only reachable before the first chunk - see ModelRouter.route_stream
-        latency_ms = int((time.monotonic() - started) * 1000)
-        logger.error(
-            "request_id=%s conversation_id=%s model=%s latency=%dms status=unavailable",
-            request_id, conversation.id, body.model, latency_ms,
-        )
-        raise HTTPException(status_code=503, detail="all providers are currently unavailable")
-
-    latency_ms = int((time.monotonic() - started) * 1000)
-    logger.info(
-        "request_id=%s conversation_id=%s provider=%s model=%s latency=%dms status=success",
-        request_id, conversation.id, final_provider, final_model, latency_ms,
+    services = services or get_services()
+    record = UsageRecord(
+        request_id or current_request_id(),
+        "chat",
+        body.model,
+        stream=True,
+        principal=principal,
+        conversation_id=body.conversation_id,
     )
-
-    full_content = "".join(collected)
+    completed = False
     try:
-        manager.save_message(conversation.id, "user", user_message)
-        manager.save_message(conversation.id, "assistant", full_content, model=final_provider)
-    except Exception:  # noqa: BLE001 - the reply already reached the client either way
-        logger.exception(
-            "request_id=%s conversation_id=%s status=persist_failed", request_id, conversation.id
-        )
-        return
+        _reject_unsupported(body)
+        _check_request_metadata(body, services, record)
+        _structured_output(body)
+        admit(body.model, principal, services, db, record)
+        manager, conversation, user_message, messages = _prepare_turn(body, db, principal, services, record)
 
-    await _maybe_summarize(manager, model_router, conversation.id, request_id)
+        collected: List[str] = []
+        first_chunk_yielded = False
+        terminal_chunk: Optional[RouteChunk] = None
+        release_connection(db)
+        try:
+            with provider_errors(record):
+                async with aclosing(
+                    model_router.route_stream(body.model, messages, _checked_generation_params(body, services, record))
+                ) as route_chunks:
+                    async for chunk in route_chunks:
+                        if chunk.delta:
+                            collected.append(chunk.delta)
+                        if chunk.done:
+                            record.provider, record.model, record.usage = chunk.provider, chunk.model, chunk.usage
+                            record.fallback, record.ttft, record.deployment = chunk.fallback, chunk.ttft, chunk.deployment
+                            record.bill(chunk.provider, chunk.model, chunk.usage)
+                            terminal_chunk = chunk
+                            continue
+                        elif not first_chunk_yielded:
+                            record.provider, record.model = chunk.provider, chunk.model
+                        yield chunk
+                        first_chunk_yielded = True
+        except HTTPException:
+            if first_chunk_yielded:
+                logger.error("stream failed after first chunk: status=%s", record.http_status)
+                completed = True
+                yield RouteChunk(record.provider or "unknown", record.model or body.model, "", done=True,
+                                 finish_reason="error", interrupted=True)
+                return
+            raise
+        completed = True
+
+        if terminal_chunk is None:
+            record.fail(502, "upstream stream ended without a terminal chunk", "interrupted")
+            yield RouteChunk(record.provider or "unknown", record.model or body.model, "", done=True,
+                             finish_reason="error", interrupted=True)
+            return
+        if terminal_chunk.interrupted:
+            record.fail(502, "upstream stream interrupted", "interrupted")
+            yield terminal_chunk
+            return
+
+        full_content = "".join(collected)
+        try:
+            full_content = services.guardrails.check_output(full_content)
+        except GuardrailViolation as exc:
+            # already streamed - can only be recorded, not blocked
+            record.fail(502, f"after-stream output guardrail: {exc}", "blocked")
+            logger.warning("output guardrail finding on an already-streamed reply: %s", exc)
+            yield terminal_chunk._replace(finish_reason="error", interrupted=True)
+            return
+
+        if conversation is None:
+            yield terminal_chunk
+            return
+        try:
+            manager.save_exchange(
+                conversation.id, conversation.version, user_message, full_content,
+                record.provider, record.usage,
+            )
+        except repository.ConversationConflictError:
+            record.fail(409, "conversation changed during streamed generation", "conflict")
+            logger.warning("streamed exchange not persisted because conversation changed: %s", conversation.id)
+            yield terminal_chunk._replace(finish_reason="error", interrupted=True)
+            return
+        except Exception:  # noqa: BLE001 - the reply already reached the client either way
+            record.fail(500, "failed to persist streamed exchange")
+            logger.exception("failed to persist streamed exchange: conversation_id=%s", conversation.id)
+            yield terminal_chunk._replace(finish_reason="error", interrupted=True)
+            return
+        yield terminal_chunk
+        await stateful.maybe_summarize(manager, model_router, conversation.id, body.model, principal, services)
+    except HTTPException as exc:
+        if record.status == "success":
+            record.fail(exc.status_code, str(exc.detail))
+        raise
+    except Exception as exc:
+        record.fail(500, f"internal error: {type(exc).__name__}")
+        raise
+    except BaseException:
+        if not completed:
+            record.fail(499, "client disconnected", "client_disconnected")
+        raise
+    finally:
+        finish(db, record, services.config.pricing, services.limiter, services.usage_writer)
 
 
 async def prime_stream(gen: AsyncIterator[RouteChunk]) -> AsyncIterator[RouteChunk]:
     """Pulls the first item out of `gen` right now, before the caller
-    constructs a StreamingResponse. `stream_chat_turn`'s setup work
-    (conversation lookup, context building, connecting to a provider) all
+    constructs a StreamingResponse. `stream_chat_turn`'s setup work all
     happens on that first pull, so an HTTPException it raises still turns
     into a normal status code - once a StreamingResponse has sent its
     headers (status 200), that's no longer possible.
@@ -218,58 +471,68 @@ async def prime_stream(gen: AsyncIterator[RouteChunk]) -> AsyncIterator[RouteChu
         first = None
 
     async def _replay() -> AsyncIterator[RouteChunk]:
-        if first is not None:
-            yield first
-        async for item in gen:
-            yield item
+        try:
+            if first is not None:
+                yield first
+            async for item in gen:
+                yield item
+        finally:
+            await gen.aclose()
 
     return _replay()
 
 
-def _get_conversation_or_404(manager: ConversationManager, conversation_id: str) -> Conversation:
+def _prepare_turn(
+    body: ChatCompletionRequest,
+    db: Session,
+    principal: Optional[Principal],
+    services: GatewayServices,
+    record: UsageRecord,
+) -> Tuple[Optional[ConversationManager], Optional[Conversation], str, List[dict]]:
+    """Validates the turn, applies input guardrails, and returns
+    (manager, conversation, user message, messages to send). Stateless
+    requests (no `conversation_id`) send the client's messages as-is and
+    touch no conversation data; stateful ones go through app/api/stateful.py."""
+    if body.conversation_id is not None:
+        return stateful.prepare_turn(body, db, principal, services, record)
+    if body.latest_user_text() is None:
+        raise HTTPException(status_code=400, detail="messages must include at least one user message")
     try:
-        return manager.get_conversation(conversation_id)
-    except ConversationNotFoundError:
-        raise HTTPException(status_code=404, detail="conversation not found")
+        messages = services.guardrails.check_input([m.model_dump(exclude_none=True) for m in body.messages])
+    except GuardrailViolation as exc:
+        record.fail(400, str(exc), "blocked")
+        raise HTTPException(status_code=400, detail=str(exc))
+    return None, None, _latest_user_content(messages), messages
 
 
-def _load_context_messages(
-    manager: ConversationManager, db: Session, conversation: Conversation, user_message: str
-) -> List[dict]:
-    recent = manager.get_recent_messages(conversation.id)
-    recent_dicts = [{"role": m.role, "content": m.content} for m in recent]
-    summary = manager.get_conversation_summary(conversation.id)
-    memories = [m.content for m in repository.get_memories(db, conversation.user_id)]
-    return build_context(summary, memories, recent_dicts, user_message)
-
-
-async def _maybe_summarize(
-    manager: ConversationManager, model_router: ModelRouter, conversation_id: str, request_id: str
-) -> None:
-    """Best-effort, same as before: never let a failed (re)summarization
-    turn into a failed chat response."""
-    message_count = manager.get_message_count(conversation_id)
-    if not should_summarize(message_count):
+def _check_request_metadata(body: ChatCompletionRequest, services: GatewayServices, record: UsageRecord) -> None:
+    if body.response_format is None:
         return
     try:
-        all_messages = manager.get_all_messages(conversation_id)
-        message_dicts = [{"role": m.role, "content": m.content} for m in all_messages]
-        summary = await summarize_conversation(model_router, message_dicts)
-        manager.update_summary(conversation_id, summary)
-        logger.info(
-            "request_id=%s conversation_id=%s status=summarized message_count=%d",
-            request_id, conversation_id, message_count,
-        )
-    except Exception:  # noqa: BLE001
-        logger.exception(
-            "request_id=%s conversation_id=%s status=summarization_failed",
-            request_id, conversation_id,
-        )
+        services.guardrails.check_auxiliary(body.response_format.model_dump(by_alias=True, exclude_none=True))
+    except GuardrailViolation as exc:
+        record.fail(400, str(exc), "blocked")
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
-def _latest_user_message(body: ChatCompletionRequest) -> Optional[str]:
-    """Return the content of the last user-role message in the request, if any."""
-    for message in reversed(body.messages):
-        if message.role == "user":
-            return message.content
-    return None
+def _checked_generation_params(
+    body: ChatCompletionRequest, services: GatewayServices, record: UsageRecord
+) -> dict:
+    params = body.generation_params()
+    cap = services.config.output_cap(body.model)
+    if cap is not None:
+        # unbounded or oversized completions are the common silent cost;
+        # a clamped reply ends with finish_reason "length"
+        params["max_tokens"] = min(params.get("max_tokens", cap), cap)
+    if not params.get("tools"):
+        return params
+    try:
+        params["tools"] = services.guardrails.check_auxiliary(params["tools"])
+    except GuardrailViolation as exc:
+        record.fail(400, str(exc), "blocked")
+        raise HTTPException(status_code=400, detail=str(exc))
+    return params
+
+
+def _latest_user_content(messages: List[Dict[str, str]]) -> str:
+    return next(m["content"] for m in reversed(messages) if m["role"] == "user")

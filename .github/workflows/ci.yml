@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: twinlm_test
+          POSTGRES_USER: twinlm_test
+          POSTGRES_PASSWORD: test-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U twinlm_test -d twinlm_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      # disposable CI database: migration, exchange and outbox tests use it
+      TEST_DATABASE_URL: postgresql+psycopg://twinlm_test:test-only-password@localhost:5432/twinlm_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"  # same as the Dockerfile base image
+          cache: pip
+      - run: pip install --require-hashes -r requirements-dev.lock
+      - run: pip check
+      - name: Offline suite + SDK contract + PostgreSQL migrations
+        run: python -m pytest -q
+      - name: Codebase graph is current
+        run: python scripts/codebase_graph.py
+      - name: Dependency vulnerabilities
+        run: pip install pip-audit && pip-audit --strict -r requirements.lock -r ui/requirements.lock
+
+  deploy-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compose (every profile)
+        run: |
+          docker compose --env-file .env.example config --quiet
+          docker compose --env-file .env.example --profile console --profile monitoring --profile ingress config --quiet
+      - name: Alert rules
+        run: docker run --rm --entrypoint promtool -v "$PWD/monitoring:/m" prom/prometheus:v2.55.1 check rules /m/alerts.yml
+      - name: Ingress config
+        run: >-
+          docker run --rm -e TWINLM_DOMAIN=api.localhost -e CONSOLE_DOMAIN=console.localhost
+          -e GRAFANA_DOMAIN=grafana.localhost -e CONSOLE_USER=operator
+          -e 'CONSOLE_PASSWORD_HASH=$2a$14$Zkx19XLiW6VYouLHR5NmfOFU0z2GTNmpkT/5qqR7hx4IjWJPDhjvG'
+          -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2.8-alpine
+          caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+  build-smoke:
+    needs: test
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t twinlm:test .
+      - run: docker build -t twinlm-console:test ./ui
+
+  image:
+    needs: [test, deploy-config]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

@@ -1,0 +1,57 @@
+# Benchmark config (loadtest/bench.py): mock providers only, no network.
+#   overhead -> zero-latency mock: end-to-end latency = gateway-added latency
+#   auto     -> 50 ms mock: throughput/concurrency
+#   outage   -> always-failing primary, then the 50 ms mock: fallback + breaker
+request_timeout_seconds = 10
+routing_strategy = "priority"
+
+[retry]
+max_retries = 1
+backoff_base_seconds = 0.05
+backoff_max_seconds = 0.2
+
+[circuit_breaker]
+failure_threshold = 5
+cooldown_seconds = 5
+
+[providers.instant]
+type = "mock"
+default_model = "instant"
+
+[providers.slow50]
+type = "mock"
+default_model = "slow50"
+mock_latency_seconds = 0.05
+
+[providers.down]
+type = "mock"
+default_model = "down"
+mock_failure_rate = 1.0
+
+[models.overhead]
+targets = ["instant"]
+
+[models.auto]
+targets = ["slow50"]
+
+[models.outage]
+targets = ["down", "slow50"]
+
+[pricing."instant/instant"]
+input_per_million = 0.10
+output_per_million = 0.40
+
+[pricing."slow50/slow50"]
+input_per_million = 0.10
+output_per_million = 0.40
+
+[guardrails]
+max_input_chars = 200000
+
+[guardrails.input]
+secrets = "block"
+pii = "log"
+prompt_injection = "log"
+
+[guardrails.output]
+secrets = "redact"

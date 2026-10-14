@@ -10,5 +10,6 @@ python-multipart
 markdown
 nh3
 pygments
-pytest
-pytest-asyncio
+prometheus-client
+jsonschema
+psycopg[binary]

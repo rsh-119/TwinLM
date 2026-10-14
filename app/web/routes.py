@@ -5,6 +5,7 @@ Reuses the existing JSON endpoints' logic directly (e.g. calls
 routes are just a thin HTML layer on top.
 """
 import json
+from contextlib import aclosing
 from pathlib import Path
 from typing import AsyncIterator, List
 from urllib.parse import quote
@@ -15,6 +16,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.api.chat import chat_completions, prime_stream, stream_chat_turn
+from app.api.common import GatewayServices, get_services
 from app.database import repository
 from app.database.database import get_db
 from app.memory.conversation_manager import ConversationManager, ConversationNotFoundError
@@ -86,7 +88,7 @@ def view_conversation(
     except ConversationNotFoundError:
         return RedirectResponse("/", status_code=303)
 
-    messages = manager.get_all_messages(conversation_id)
+    messages = manager.get_recent_messages(conversation_id, limit=100)
     memories = repository.get_memories(db, conversation.user_id)
     return templates.TemplateResponse(
         request,
@@ -95,6 +97,7 @@ def view_conversation(
             "conversation": conversation,
             "messages": messages,
             "memories": memories,
+            "total_tokens": manager.get_total_tokens(conversation_id),
             "active_conversation_id": conversation.id,
             "sidebar_conversations": _sidebar_items(db, conversation.user_id),
             "error": error,
@@ -109,6 +112,7 @@ async def send_message_ui(
     model: str = Form("auto"),
     db: Session = Depends(get_db),
     model_router: ModelRouter = Depends(get_model_router),
+    services: GatewayServices = Depends(get_services),
 ):
     body = ChatCompletionRequest(
         conversation_id=conversation_id,
@@ -116,7 +120,9 @@ async def send_message_ui(
         messages=[ChatMessageIn(role="user", content=content)],
     )
     try:
-        await chat_completions(body, db=db, model_router=model_router)
+        await chat_completions(
+            body, response=None, db=db, model_router=model_router, principal=None, services=services
+        )
     except HTTPException as exc:
         return RedirectResponse(
             f"/conversations/{conversation_id}?error={quote(str(exc.detail))}", status_code=303
@@ -131,6 +137,7 @@ async def send_message_stream_ui(
     model: str = Form("auto"),
     db: Session = Depends(get_db),
     model_router: ModelRouter = Depends(get_model_router),
+    services: GatewayServices = Depends(get_services),
 ):
     """What the composer's JS (conversation.html) actually calls: same turn
     as `send_message_ui` above, but streamed - each event carries the
@@ -144,20 +151,23 @@ async def send_message_stream_ui(
         model=model,
         messages=[ChatMessageIn(role="user", content=content)],
     )
-    chunks = await prime_stream(stream_chat_turn(body, db, model_router))
+    chunks = await prime_stream(stream_chat_turn(body, db, model_router, services=services))
 
     async def _events() -> AsyncIterator[str]:
         accumulated = ""
-        async for chunk in chunks:
-            if chunk.delta:
-                accumulated += chunk.delta
-            payload = {
-                "provider": chunk.provider,
-                "model": chunk.model,
-                "done": chunk.done,
-                "html": render_message(accumulated),
-            }
-            yield f"data: {json.dumps(payload)}\n\n"
+        async with aclosing(chunks):
+            async for chunk in chunks:
+                if chunk.delta:
+                    accumulated += chunk.delta
+                payload = {
+                    "provider": chunk.provider,
+                    "model": chunk.model,
+                    "done": chunk.done,
+                    "html": render_message(accumulated),
+                }
+                if chunk.usage:
+                    payload["usage"] = chunk.usage._asdict()
+                yield f"data: {json.dumps(payload)}\n\n"
 
     return StreamingResponse(_events(), media_type="text/event-stream")
 

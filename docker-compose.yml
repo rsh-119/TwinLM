@@ -1,0 +1,169 @@
+# TwinLM. The default is the minimal supported deployment: one gateway,
+# PostgreSQL, and one-shot secret generation.
+#
+#   docker compose up -d --build                                   # gateway + database
+#   docker compose --profile console up -d                         # + Streamlit test console
+#   docker compose --profile monitoring up -d                      # + Prometheus (with alert rules) + Grafana
+#   docker compose --profile ingress --profile console up -d       # + Caddy TLS ingress (see docs/OPERATIONS.md)
+#
+# - Secrets (admin token, Postgres, Grafana and console passwords) are
+#   generated randomly on first start into the `secrets` volume and reused.
+#   Print one with:  docker compose exec gateway cat /run/secrets/admin_token
+# - Provider keys (GEMINI_API_KEY, GROQ_API_KEY, ...) and switches
+#   (STATEFUL_ENABLED, STATEFUL_REQUIRES_USER_KEYS, ...) come from .env.
+#   Without provider keys, use mock providers:
+#   GATEWAY_CONFIG_FILE=./loadtest/gateway.mock.toml in .env.
+# - Direct ports bind to 127.0.0.1. For shared access use the `ingress`
+#   profile (TLS + basic auth for operator UIs), not wider binds.
+# - One gateway instance is the supported baseline: rate limits, circuit
+#   breakers and the cache are in-process. Images are pinned by digest.
+
+services:
+  secrets:
+    image: alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+    volumes:
+      - secrets:/secrets
+    command:
+      - sh
+      - -c
+      - |
+        for name in postgres_password admin_token grafana_password console_password; do
+          [ -s /secrets/$$name ] || tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 40 > /secrets/$$name
+        done
+        chmod 444 /secrets/*
+        echo "secrets ready (generated once, reused on restart)"
+    restart: "no"
+
+  gateway:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      AUTH_ENABLED: "true"
+      WEB_UI_ENABLED: "false"
+      GATEWAY_CONFIG_PATH: /app/gateway.toml
+      # password read from the generated secret, so `docker compose exec
+      # gateway python -m app.ops ...` reaches the same database
+      DATABASE_URL: postgresql+psycopg://twinlm@postgres:5432/twinlm
+      DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
+    volumes:
+      - ${GATEWAY_CONFIG_FILE:-./gateway.toml}:/app/gateway.toml:ro
+      - secrets:/run/secrets:ro
+      - gateway-data:/app/data   # usage outbox (USAGE_SPOOL_PATH) - keep it
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        export ADMIN_TOKEN="$$(cat /run/secrets/admin_token)"
+        exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log --proxy-headers
+    ports:
+      - "${GATEWAY_BIND:-127.0.0.1}:${GATEWAY_PORT:-8000}:8000"
+    depends_on:
+      secrets:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      POSTGRES_DB: twinlm
+      POSTGRES_USER: twinlm
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - secrets:/run/secrets:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U twinlm -d twinlm"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      secrets:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  ui:
+    profiles: [console]
+    build: ./ui
+    environment:
+      GATEWAY_URL: http://gateway:8000
+    ports:
+      - "${UI_BIND:-127.0.0.1}:${UI_PORT:-8501}:8501"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    restart: unless-stopped
+
+  prometheus:
+    profiles: [monitoring]
+    image: prom/prometheus:v2.55.1@sha256:2659f4c2ebb718e7695cb9b25ffa7d6be64db013daba13e05c875451cf51b0d3
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${PROMETHEUS_BIND:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
+    depends_on:
+      - gateway
+    restart: unless-stopped
+
+  grafana:
+    profiles: [monitoring]
+    image: grafana/grafana:11.3.0@sha256:a0f881232a6fb71a0554a47d0fe2203b6888fe77f4cefb7ea62bed7eb54e13c3
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # read-only dashboards without a Grafana login: only reachable on
+      # loopback or behind the ingress's basic auth
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      # the ingress's basic-auth header is not a Grafana credential
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/twinlm.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+      - secrets:/run/secrets:ro
+    ports:
+      - "${GRAFANA_BIND:-127.0.0.1}:${GRAFANA_PORT:-3001}:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  caddy:
+    profiles: [ingress]
+    image: caddy:2.8-alpine@sha256:af32e97399febea808609119bb21544d0265c58a02836576e32a2d082c262c17
+    environment:
+      TWINLM_DOMAIN: ${TWINLM_DOMAIN:-api.localhost}
+      CONSOLE_DOMAIN: ${CONSOLE_DOMAIN:-console.localhost}
+      GRAFANA_DOMAIN: ${GRAFANA_DOMAIN:-grafana.localhost}
+      CONSOLE_USER: ${CONSOLE_USER:-operator}
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        export CONSOLE_PASSWORD_HASH="$$(caddy hash-password --plaintext "$$(cat /run/secrets/console_password)")"
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - secrets:/run/secrets:ro
+      - caddy-data:/data   # TLS certificates and keys
+      - caddy-config:/config
+    ports:
+      - "${INGRESS_BIND:-0.0.0.0}:${INGRESS_HTTP_PORT:-80}:80"
+      - "${INGRESS_BIND:-0.0.0.0}:${INGRESS_HTTPS_PORT:-443}:443"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  secrets:
+  gateway-data:
+  postgres-data:
+  prometheus-data:
+  grafana-data:
+  caddy-data:
+  caddy-config:

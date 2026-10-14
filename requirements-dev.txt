@@ -1,0 +1,5 @@
+# Test/CI dependencies on top of the runtime set.
+-r requirements.txt
+pytest
+pytest-asyncio
+openai

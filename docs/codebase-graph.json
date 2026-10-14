@@ -1,0 +1,2604 @@
+{
+ "schema": 1,
+ "source": {
+  "revision": "a2a04efcc2a5390130c7a33ec2e1f0e9d1c7e7fa",
+  "working_tree_dirty": true,
+  "fingerprint": "ada85f58e33524be",
+  "updated_at": "2026-10-14T12:52:40Z"
+ },
+ "annotations": [
+  {
+   "path": "app/main.py",
+   "note": "app.include_router(web_routes.router) only when WEB_UI_ENABLED=true (evaluated at import)."
+  },
+  {
+   "path": "app/main.py",
+   "note": "Singletons are functools.lru_cache factories: get_settings, get_gateway_config, get_model_router, get_services, get_guardrails, get_rate_limiter, get_response_cache. lifespan() warms them and clears router/services on shutdown."
+  },
+  {
+   "path": "tests/conftest.py",
+   "note": "Tests replace get_db, get_model_router and get_services through app.dependency_overrides; routes see fake providers and an isolated config."
+  },
+  {
+   "path": "app/web/routes.py",
+   "note": "Web UI calls chat_completions/stream_chat_turn as plain functions with principal=None (default project)."
+  },
+  {
+   "path": "app/main.py",
+   "note": "conversations/memories routers are mounted only when STATEFUL_ENABLED=true; the web UI only when WEB_UI_ENABLED and STATEFUL_ENABLED (both read at import)."
+  },
+  {
+   "path": "app/router/model_router.py",
+   "note": "Providers are built by type in build_provider (gemini | openai_compatible | mock); deployments/groups come from gateway.toml via build_router. Routing edges are config-driven, not static calls."
+  }
+ ],
+ "nodes": [
+  {
+   "id": "app.main",
+   "kind": "module",
+   "path": "app/main.py",
+   "purpose": "FastAPI assembly: lifespan startup checks, middleware, error shape, router mounting, /health /ready /metrics"
+  },
+  {
+   "id": "app.config",
+   "kind": "module",
+   "path": "app/config.py",
+   "purpose": "Environment/.env settings: secrets, AUTH/STATEFUL/MIGRATE switches"
+  },
+  {
+   "id": "app.auth",
+   "kind": "module",
+   "path": "app/auth.py",
+   "purpose": "Gateway API-key auth -> Principal (project, limits, optional user_id); TTL key cache with revoke eviction; admin token check"
+  },
+  {
+   "id": "app.request_limits",
+   "kind": "module",
+   "path": "app/request_limits.py",
+   "purpose": "ASGI body-size and in-flight request limits"
+  },
+  {
+   "id": "app.observability",
+   "kind": "module",
+   "path": "app/observability.py",
+   "purpose": "Prometheus metrics, request IDs, JSON logging with redaction"
+  },
+  {
+   "id": "app.api.common",
+   "kind": "module",
+   "path": "app/api/common.py",
+   "purpose": "GatewayServices DI, admission (allow-list, RPM/TPM, advisory budget), provider error mapping"
+  },
+  {
+   "id": "app.api.chat",
+   "kind": "module",
+   "path": "app/api/chat.py",
+   "purpose": "POST /v1/chat/completions: stateless proxy core, SSE, structured output; delegates conversation_id turns to app.api.stateful"
+  },
+  {
+   "id": "app.api.embeddings",
+   "kind": "module",
+   "path": "app/api/embeddings.py",
+   "purpose": "POST /v1/embeddings"
+  },
+  {
+   "id": "app.api.models",
+   "kind": "module",
+   "path": "app/api/models.py",
+   "purpose": "GET /v1/models filtered by key allow-list, with capabilities"
+  },
+  {
+   "id": "app.api.conversations",
+   "kind": "module",
+   "path": "app/api/conversations.py",
+   "purpose": "Conversation CRUD + message history pages"
+  },
+  {
+   "id": "app.api.memories",
+   "kind": "module",
+   "path": "app/api/memories.py",
+   "purpose": "User memory facts"
+  },
+  {
+   "id": "app.api.admin",
+   "kind": "module",
+   "path": "app/api/admin.py",
+   "purpose": "Admin API: providers, models/deployments, usage (known cost + unpriced), keys (create/rotate/revoke), cache"
+  },
+  {
+   "id": "app.schemas.chat",
+   "kind": "module",
+   "path": "app/schemas/chat.py",
+   "purpose": "Pydantic chat request/response wire schema"
+  },
+  {
+   "id": "app.router.model_router",
+   "kind": "module",
+   "path": "app/router/model_router.py",
+   "purpose": "Model groups of deployments, capability gating, strategy order, retries, provider breakers, fallback, streaming relay; builds router from gateway.toml"
+  },
+  {
+   "id": "app.providers.base",
+   "kind": "module",
+   "path": "app/providers/base.py",
+   "purpose": "Provider interface, error taxonomy, TokenUsage"
+  },
+  {
+   "id": "app.providers.gemini",
+   "kind": "module",
+   "path": "app/providers/gemini.py",
+   "purpose": "Gemini generateContent adapter"
+  },
+  {
+   "id": "app.providers.openai_compatible",
+   "kind": "module",
+   "path": "app/providers/openai_compatible.py",
+   "purpose": "OpenAI-compatible adapter (Groq, OpenAI, Ollama, vLLM...)"
+  },
+  {
+   "id": "app.providers.groq",
+   "kind": "module",
+   "path": "app/providers/groq.py",
+   "purpose": "Groq defaults over the OpenAI-compatible adapter"
+  },
+  {
+   "id": "app.providers.mock",
+   "kind": "module",
+   "path": "app/providers/mock.py",
+   "purpose": "Offline mock provider for tests/load tests"
+  },
+  {
+   "id": "app.gateway.config",
+   "kind": "module",
+   "path": "app/gateway/config.py",
+   "purpose": "gateway.toml schema: providers (+capabilities), deployments, aliases (targets|groups), pricing, limits, cache, guardrails"
+  },
+  {
+   "id": "app.gateway.usage",
+   "kind": "module",
+   "path": "app/gateway/usage.py",
+   "purpose": "UsageRecord, finish() accounting, SQLite outbox UsageWriter"
+  },
+  {
+   "id": "app.gateway.pricing",
+   "kind": "module",
+   "path": "app/gateway/pricing.py",
+   "purpose": "Cost from configured prices; unknown -> None"
+  },
+  {
+   "id": "app.gateway.rate_limit",
+   "kind": "module",
+   "path": "app/gateway/rate_limit.py",
+   "purpose": "In-process sliding-window RPM/TPM limiter"
+  },
+  {
+   "id": "app.gateway.health",
+   "kind": "module",
+   "path": "app/gateway/health.py",
+   "purpose": "Per-provider circuit breaker and live stats"
+  },
+  {
+   "id": "app.gateway.retry",
+   "kind": "module",
+   "path": "app/gateway/retry.py",
+   "purpose": "Backoff policy with full jitter"
+  },
+  {
+   "id": "app.gateway.cache",
+   "kind": "module",
+   "path": "app/gateway/cache.py",
+   "purpose": "In-process exact-match response cache"
+  },
+  {
+   "id": "app.gateway.guardrails",
+   "kind": "module",
+   "path": "app/gateway/guardrails.py",
+   "purpose": "Heuristic secrets/PII/prompt-injection checks"
+  },
+  {
+   "id": "app.gateway.structured",
+   "kind": "module",
+   "path": "app/gateway/structured.py",
+   "purpose": "JSON/JSON-schema validation and repair prompts"
+  },
+  {
+   "id": "app.memory.conversation_manager",
+   "kind": "module",
+   "path": "app/memory/conversation_manager.py",
+   "purpose": "Conversation access scoped to project and optional user"
+  },
+  {
+   "id": "app.memory.context_builder",
+   "kind": "module",
+   "path": "app/memory/context_builder.py",
+   "purpose": "Pure prompt assembly from summary, memories, recent turns"
+  },
+  {
+   "id": "app.memory.summarizer",
+   "kind": "module",
+   "path": "app/memory/summarizer.py",
+   "purpose": "Rolling summary prompt and threshold"
+  },
+  {
+   "id": "app.database.database",
+   "kind": "module",
+   "path": "app/database/database.py",
+   "purpose": "Engine, sessions, versioned forward-only migrations (MIGRATIONS, init_db), release_connection"
+  },
+  {
+   "id": "app.database.models",
+   "kind": "module",
+   "path": "app/database/models.py",
+   "purpose": "ORM tables"
+  },
+  {
+   "id": "app.database.repository",
+   "kind": "module",
+   "path": "app/database/repository.py",
+   "purpose": "CRUD/queries; no business rules"
+  },
+  {
+   "id": "app.web.routes",
+   "kind": "module",
+   "path": "app/web/routes.py",
+   "purpose": "Optional login-less Jinja UI (WEB_UI_ENABLED)"
+  },
+  {
+   "id": "app.web.formatting",
+   "kind": "module",
+   "path": "app/web/formatting.py",
+   "purpose": "Markdown rendering for the web UI"
+  },
+  {
+   "id": "app.api.chat:chat_completions",
+   "kind": "function",
+   "path": "app/api/chat.py",
+   "symbol": "chat_completions",
+   "purpose": "Non-streaming entry; dispatches stream=true to SSE"
+  },
+  {
+   "id": "app.api.chat:stream_chat_turn",
+   "kind": "function",
+   "path": "app/api/chat.py",
+   "symbol": "stream_chat_turn",
+   "purpose": "Streaming pipeline shared by SSE and web UI"
+  },
+  {
+   "id": "app.api.chat:_prepare_turn",
+   "kind": "function",
+   "path": "app/api/chat.py",
+   "symbol": "_prepare_turn",
+   "purpose": "Stateless: guardrails on client messages; stateful: delegate to stateful.prepare_turn"
+  },
+  {
+   "id": "app.api.chat:_reject_unsupported",
+   "kind": "function",
+   "path": "app/api/chat.py",
+   "symbol": "_reject_unsupported",
+   "purpose": "Explicit 400s for unsupported request features"
+  },
+  {
+   "id": "app.api.chat:_complete",
+   "kind": "function",
+   "path": "app/api/chat.py",
+   "symbol": "_complete",
+   "purpose": "Non-streaming pipeline: admit, prepare, cache, route, structure, guard, persist"
+  },
+  {
+   "id": "app.api.common:admit",
+   "kind": "function",
+   "path": "app/api/common.py",
+   "symbol": "admit",
+   "purpose": "Per-key allow-list, RPM/TPM and advisory daily budget"
+  },
+  {
+   "id": "app.api.common:provider_errors",
+   "kind": "function",
+   "path": "app/api/common.py",
+   "symbol": "provider_errors",
+   "purpose": "Router/provider exceptions -> HTTP status"
+  },
+  {
+   "id": "app.auth:authenticate",
+   "kind": "function",
+   "path": "app/auth.py",
+   "symbol": "authenticate",
+   "purpose": "Bearer key -> Principal (None when auth disabled)"
+  },
+  {
+   "id": "app.auth:require_admin",
+   "kind": "function",
+   "path": "app/auth.py",
+   "symbol": "require_admin",
+   "purpose": "ADMIN_TOKEN check for /admin"
+  },
+  {
+   "id": "app.router.model_router:ModelRouter",
+   "kind": "class",
+   "path": "app/router/model_router.py",
+   "symbol": "ModelRouter",
+   "purpose": "Routing engine"
+  },
+  {
+   "id": "app.router.model_router:build_router",
+   "kind": "function",
+   "path": "app/router/model_router.py",
+   "symbol": "build_router",
+   "purpose": "gateway.toml -> providers + aliases"
+  },
+  {
+   "id": "app.gateway.usage:finish",
+   "kind": "function",
+   "path": "app/gateway/usage.py",
+   "symbol": "finish",
+   "purpose": "Idempotent accounting: metrics, TPM, request_logs row"
+  },
+  {
+   "id": "app.gateway.usage:UsageWriter",
+   "kind": "class",
+   "path": "app/gateway/usage.py",
+   "symbol": "UsageWriter",
+   "purpose": "Durable SQLite outbox to request_logs with deadletter"
+  },
+  {
+   "id": "app.database.database:init_db",
+   "kind": "function",
+   "path": "app/database/database.py",
+   "symbol": "init_db",
+   "purpose": "Startup schema creation/upgrade under a lock"
+  },
+  {
+   "id": "app.memory.context_builder:build_context",
+   "kind": "function",
+   "path": "app/memory/context_builder.py",
+   "symbol": "build_context",
+   "purpose": "Stateful prompt assembly"
+  },
+  {
+   "id": "app.schemas.chat:ChatCompletionRequest",
+   "kind": "class",
+   "path": "app/schemas/chat.py",
+   "symbol": "ChatCompletionRequest",
+   "purpose": "Chat request schema"
+  },
+  {
+   "id": "table:conversations",
+   "kind": "table",
+   "path": "app/database/models.py",
+   "symbol": "Conversation",
+   "purpose": "Conversation per (project, user_id); optimistic version"
+  },
+  {
+   "id": "table:messages",
+   "kind": "table",
+   "path": "app/database/models.py",
+   "symbol": "Message",
+   "purpose": "Stored user/assistant text + per-turn usage"
+  },
+  {
+   "id": "table:memories",
+   "kind": "table",
+   "path": "app/database/models.py",
+   "symbol": "Memory",
+   "purpose": "User facts per (project, user_id)"
+  },
+  {
+   "id": "table:api_keys",
+   "kind": "table",
+   "path": "app/database/models.py",
+   "symbol": "ApiKey",
+   "purpose": "Hashed gateway keys with project, limits, budget"
+  },
+  {
+   "id": "table:request_logs",
+   "kind": "table",
+   "path": "app/database/models.py",
+   "symbol": "RequestLog",
+   "purpose": "Usage/cost ledger; no prompt text"
+  },
+  {
+   "id": "outbox:usage-spool",
+   "kind": "store",
+   "path": "app/gateway/usage.py",
+   "symbol": "UsageWriter",
+   "purpose": "Local SQLite pending/deadletter tables (USAGE_SPOOL_PATH)"
+  },
+  {
+   "id": "config:gateway.toml",
+   "kind": "config",
+   "path": "gateway.toml",
+   "purpose": "Providers, aliases, routing, pricing, limits, cache, guardrails"
+  },
+  {
+   "id": "config:mock.toml",
+   "kind": "config",
+   "path": "loadtest/gateway.mock.toml",
+   "purpose": "Offline mock providers for load tests"
+  },
+  {
+   "id": "config:env",
+   "kind": "config",
+   "path": ".env.example",
+   "purpose": "Secrets and switches read by app.config.Settings"
+  },
+  {
+   "id": "deploy:compose",
+   "kind": "config",
+   "path": "docker-compose.yml",
+   "purpose": "Minimal default (secrets, postgres, gateway) + profiles console, monitoring, ingress; images pinned by digest"
+  },
+  {
+   "id": "deploy:dockerfile",
+   "kind": "config",
+   "path": "Dockerfile",
+   "purpose": "Gateway image: digest-pinned base, hash-locked deps, non-root"
+  },
+  {
+   "id": "ci:workflow",
+   "kind": "config",
+   "path": ".github/workflows/ci.yml",
+   "purpose": "CI: locked deps, tests incl. PostgreSQL + SDK contract, graph check, pip-audit, compose/alerts/Caddy validation, image build"
+  },
+  {
+   "id": "tests.test_chat",
+   "kind": "test",
+   "path": "tests/test_chat.py",
+   "purpose": "Stateful chat/conversation API"
+  },
+  {
+   "id": "tests.test_openai_compat",
+   "kind": "test",
+   "path": "tests/test_openai_compat.py",
+   "purpose": "OpenAI wire shape, tools, streaming"
+  },
+  {
+   "id": "tests.test_gateway_api",
+   "kind": "test",
+   "path": "tests/test_gateway_api.py",
+   "purpose": "Auth, admission, usage, cache, guardrails, structured output, outbox"
+  },
+  {
+   "id": "tests.test_router",
+   "kind": "test",
+   "path": "tests/test_router.py",
+   "purpose": "Alias resolution and fallback"
+  },
+  {
+   "id": "tests.test_resilience",
+   "kind": "test",
+   "path": "tests/test_resilience.py",
+   "purpose": "Retries, timeouts, breakers, strategies"
+  },
+  {
+   "id": "tests.test_providers",
+   "kind": "test",
+   "path": "tests/test_providers.py",
+   "purpose": "Provider adapters' wire translation"
+  },
+  {
+   "id": "tests.test_memory",
+   "kind": "test",
+   "path": "tests/test_memory.py",
+   "purpose": "Context builder, summarizer, manager"
+  },
+  {
+   "id": "tests.test_formatting",
+   "kind": "test",
+   "path": "tests/test_formatting.py",
+   "purpose": "Web UI markdown"
+  },
+  {
+   "id": "tests.test_request_limits",
+   "kind": "test",
+   "path": "tests/test_request_limits.py",
+   "purpose": "Concurrency middleware"
+  },
+  {
+   "id": "tests.test_postgres_integration",
+   "kind": "test",
+   "path": "tests/test_postgres_integration.py",
+   "purpose": "PostgreSQL exchange + outbox (needs TEST_DATABASE_URL)"
+  },
+  {
+   "id": "app.api.stateful",
+   "kind": "module",
+   "path": "app/api/stateful.py",
+   "purpose": "Optional stateful layer: ownership (service vs user-bound keys), context assembly, summaries; STATEFUL_ENABLED gate"
+  },
+  {
+   "id": "app.api.stateful:prepare_turn",
+   "kind": "function",
+   "path": "app/api/stateful.py",
+   "purpose": "Ownership check + summary/history/memories context + guardrails for a conversation turn",
+   "symbol": "prepare_turn"
+  },
+  {
+   "id": "app.api.stateful:maybe_summarize",
+   "kind": "function",
+   "path": "app/api/stateful.py",
+   "purpose": "Best-effort rolling summary, accounted as its own request",
+   "symbol": "maybe_summarize"
+  },
+  {
+   "id": "app.api.stateful:owner_for",
+   "kind": "function",
+   "path": "app/api/stateful.py",
+   "purpose": "user_id to act for: bound user, or service key's requested user (403 on mismatch)",
+   "symbol": "owner_for"
+  },
+  {
+   "id": "app.api.stateful:manager_for",
+   "kind": "function",
+   "path": "app/api/stateful.py",
+   "purpose": "ConversationManager scoped to the key's project and bound user",
+   "symbol": "manager_for"
+  },
+  {
+   "id": "app.api.stateful:bound_user",
+   "kind": "function",
+   "path": "app/api/stateful.py",
+   "purpose": "User of a user-bound key; enforces STATEFUL_REQUIRES_USER_KEYS",
+   "symbol": "bound_user"
+  },
+  {
+   "id": "app.router.model_router:Deployment",
+   "kind": "class",
+   "path": "app/router/model_router.py",
+   "purpose": "Routable (provider, model) with id and capability set",
+   "symbol": "Deployment"
+  },
+  {
+   "id": "app.router.model_router:ModelRouter._plan",
+   "kind": "function",
+   "path": "app/router/model_router.py",
+   "purpose": "Groups -> capability filter -> strategy order -> (deployment, is_fallback) list",
+   "symbol": "ModelRouter._plan"
+  },
+  {
+   "id": "app.router.model_router:required_capabilities",
+   "kind": "function",
+   "path": "app/router/model_router.py",
+   "purpose": "Capabilities a chat request needs (chat, tools, vision)",
+   "symbol": "required_capabilities"
+  },
+  {
+   "id": "app.gateway.usage:UsageRecord.served_by",
+   "kind": "function",
+   "path": "app/gateway/usage.py",
+   "purpose": "Attribute provider/model/deployment/usage of a routed call and bill it",
+   "symbol": "UsageRecord.served_by"
+  },
+  {
+   "id": "app.database.database:MIGRATIONS",
+   "kind": "symbol",
+   "path": "app/database/database.py",
+   "purpose": "Append-only list of (version, idempotent migration)",
+   "symbol": "MIGRATIONS"
+  },
+  {
+   "id": "app.api.admin:rotate_key",
+   "kind": "function",
+   "path": "app/api/admin.py",
+   "purpose": "Issue a replacement key with the same settings",
+   "symbol": "rotate_key"
+  },
+  {
+   "id": "app.ops",
+   "kind": "module",
+   "path": "app/ops.py",
+   "purpose": "Operator CLI: migrate [--check], verify, retention, outbox status/list/reconcile/requeue/export"
+  },
+  {
+   "id": "app.providers.base:TokenUsage.reported",
+   "kind": "function",
+   "path": "app/providers/base.py",
+   "purpose": "Provider usage -> TokenUsage, or None when a count is missing (unknown, never 0)",
+   "symbol": "TokenUsage.reported"
+  },
+  {
+   "id": "app.database.repository:usage_summary",
+   "kind": "function",
+   "path": "app/database/repository.py",
+   "purpose": "Grouped usage: provider tokens (no cache hits), known cost, unpriced_requests",
+   "symbol": "usage_summary"
+  },
+  {
+   "id": "deploy:caddyfile",
+   "kind": "config",
+   "path": "deploy/Caddyfile",
+   "purpose": "TLS ingress: only /v1 public; basic auth on console/Grafana"
+  },
+  {
+   "id": "monitoring:alerts",
+   "kind": "config",
+   "path": "monitoring/alerts.yml",
+   "purpose": "Prometheus alert rules (down, errors, breaker, outbox, unpriced)"
+  },
+  {
+   "id": "deps:lock",
+   "kind": "config",
+   "path": "requirements.lock",
+   "purpose": "Hash-locked runtime deps (Linux/Python 3.11); dev: requirements-dev.lock; console: ui/requirements.lock"
+  },
+  {
+   "id": "config:bench.toml",
+   "kind": "config",
+   "path": "loadtest/gateway.bench.toml",
+   "purpose": "Mock providers for loadtest/bench.py (overhead, auto, outage aliases)"
+  },
+  {
+   "id": "script:graph",
+   "kind": "script",
+   "path": "scripts/codebase_graph.py",
+   "purpose": "Validates/refreshes this graph (AST)"
+  },
+  {
+   "id": "script:backup",
+   "kind": "script",
+   "path": "scripts/backup.sh",
+   "purpose": "pg_dump + outbox copy + checksums"
+  },
+  {
+   "id": "script:restore-drill",
+   "kind": "script",
+   "path": "scripts/restore_drill.sh",
+   "purpose": "Restore a dump into a throwaway PostgreSQL and verify"
+  },
+  {
+   "id": "bench:stack",
+   "kind": "script",
+   "path": "loadtest/bench.py",
+   "purpose": "Whole-stack benchmark in a throwaway Compose project"
+  },
+  {
+   "id": "docs:operations",
+   "kind": "script",
+   "path": "docs/OPERATIONS.md",
+   "purpose": "Runbook: deploy, ingress, migrations, backup/restore, retention, rotation, outbox, alerts"
+  },
+  {
+   "id": "tests.test_sdk_contract",
+   "kind": "test",
+   "path": "tests/test_sdk_contract.py",
+   "purpose": "Official OpenAI SDK: chat, stream+usage, tools, embeddings, models, 400/401 errors"
+  },
+  {
+   "id": "tests.test_deployments",
+   "kind": "test",
+   "path": "tests/test_deployments.py",
+   "purpose": "Model groups vs fallback, deployment ids, capability gating, config validation"
+  },
+  {
+   "id": "tests.test_ownership",
+   "kind": "test",
+   "path": "tests/test_ownership.py",
+   "purpose": "Cross-user/cross-project isolation, user-bound keys, rotation, stateful off, strict fields"
+  },
+  {
+   "id": "tests.test_accounting",
+   "kind": "test",
+   "path": "tests/test_accounting.py",
+   "purpose": "Unknown usage stays null, Gemini thinking tokens, cache-hit tokens, unpriced counts"
+  },
+  {
+   "id": "tests.test_ops",
+   "kind": "test",
+   "path": "tests/test_ops.py",
+   "purpose": "Migrations v1->v2 on SQLite/PostgreSQL, newer-schema refusal, retention, verify, outbox reconcile/requeue"
+  },
+  {
+   "id": "app.auth:forget_key",
+   "kind": "function",
+   "path": "app/auth.py",
+   "symbol": "forget_key",
+   "purpose": "Evict a key from the auth cache (revoke/rotate)"
+  },
+  {
+   "id": "app.api.admin:savings",
+   "kind": "function",
+   "path": "app/api/admin.py",
+   "symbol": "savings",
+   "purpose": "GET /admin/savings: actual vs baseline cost, cache-avoided cost"
+  },
+  {
+   "id": "app.database.repository:savings_rows",
+   "kind": "function",
+   "path": "app/database/repository.py",
+   "symbol": "savings_rows",
+   "purpose": "Measured tokens/cost per group, provider, model, cache hit"
+  },
+  {
+   "id": "app.gateway.config:GatewayConfig.output_cap",
+   "kind": "function",
+   "path": "app/gateway/config.py",
+   "symbol": "GatewayConfig.output_cap",
+   "purpose": "Output-token cap for a model (alias override or global default)"
+  },
+  {
+   "id": "app.gateway.config:GatewayConfig.cache_ttl",
+   "kind": "function",
+   "path": "app/gateway/config.py",
+   "symbol": "GatewayConfig.cache_ttl",
+   "purpose": "Per-alias cache TTL; 0 = never cache"
+  },
+  {
+   "id": "tests.test_cost_controls",
+   "kind": "test",
+   "path": "tests/test_cost_controls.py",
+   "purpose": "Output caps, cache eligibility and TTL, savings report math"
+  },
+  {
+   "id": "route:DELETE /admin/cache",
+   "kind": "route",
+   "path": "app/api/admin.py",
+   "symbol": "clear_cache",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:DELETE /admin/keys/{key_id}",
+   "kind": "route",
+   "path": "app/api/admin.py",
+   "symbol": "revoke_key",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:DELETE /v1/conversations/{conversation_id}",
+   "kind": "route",
+   "path": "app/api/conversations.py",
+   "symbol": "delete_conversation",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /",
+   "kind": "route",
+   "path": "app/web/routes.py",
+   "symbol": "home",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /admin/keys",
+   "kind": "route",
+   "path": "app/api/admin.py",
+   "symbol": "list_keys",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /admin/models",
+   "kind": "route",
+   "path": "app/api/admin.py",
+   "symbol": "models",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /admin/providers",
+   "kind": "route",
+   "path": "app/api/admin.py",
+   "symbol": "providers",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /admin/savings",
+   "kind": "route",
+   "path": "app/api/admin.py",
+   "symbol": "savings",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /admin/usage",
+   "kind": "route",
+   "path": "app/api/admin.py",
+   "symbol": "usage",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /conversations/{conversation_id}",
+   "kind": "route",
+   "path": "app/web/routes.py",
+   "symbol": "view_conversation",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /health",
+   "kind": "route",
+   "path": "app/main.py",
+   "symbol": "health",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /metrics",
+   "kind": "route",
+   "path": "app/main.py",
+   "symbol": "metrics",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /ready",
+   "kind": "route",
+   "path": "app/main.py",
+   "symbol": "ready",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /v1/conversations/{conversation_id}",
+   "kind": "route",
+   "path": "app/api/conversations.py",
+   "symbol": "get_conversation",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /v1/conversations/{conversation_id}/messages",
+   "kind": "route",
+   "path": "app/api/conversations.py",
+   "symbol": "get_conversation_messages",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /v1/memories/{user_id}",
+   "kind": "route",
+   "path": "app/api/memories.py",
+   "symbol": "list_memories",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /v1/models",
+   "kind": "route",
+   "path": "app/api/models.py",
+   "symbol": "list_models",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /admin/keys",
+   "kind": "route",
+   "path": "app/api/admin.py",
+   "symbol": "create_key",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /admin/keys/{key_id}/rotate",
+   "kind": "route",
+   "path": "app/api/admin.py",
+   "symbol": "rotate_key",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /conversations",
+   "kind": "route",
+   "path": "app/web/routes.py",
+   "symbol": "create_conversation_ui",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /conversations/{conversation_id}/chat",
+   "kind": "route",
+   "path": "app/web/routes.py",
+   "symbol": "send_message_ui",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /conversations/{conversation_id}/chat/stream",
+   "kind": "route",
+   "path": "app/web/routes.py",
+   "symbol": "send_message_stream_ui",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /conversations/{conversation_id}/delete",
+   "kind": "route",
+   "path": "app/web/routes.py",
+   "symbol": "delete_conversation_ui",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /memories",
+   "kind": "route",
+   "path": "app/web/routes.py",
+   "symbol": "add_memory_ui",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /v1/chat/completions",
+   "kind": "route",
+   "path": "app/api/chat.py",
+   "symbol": "chat_completions",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /v1/conversations",
+   "kind": "route",
+   "path": "app/api/conversations.py",
+   "symbol": "create_conversation",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /v1/embeddings",
+   "kind": "route",
+   "path": "app/api/embeddings.py",
+   "symbol": "create_embeddings",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /v1/memories",
+   "kind": "route",
+   "path": "app/api/memories.py",
+   "symbol": "create_memory",
+   "purpose": "",
+   "auto": true
+  }
+ ],
+ "edges": [
+  {
+   "from": "app.api.chat:_complete",
+   "to": "app.api.common:admit",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.chat:_complete",
+   "to": "app.api.chat:_prepare_turn",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.chat:stream_chat_turn",
+   "to": "app.api.chat:_prepare_turn",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.chat:_complete",
+   "to": "app.router.model_router:ModelRouter",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.chat:chat_completions",
+   "to": "app.gateway.usage:finish",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.chat:stream_chat_turn",
+   "to": "app.gateway.usage:finish",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.embeddings",
+   "to": "app.api.common:admit",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.embeddings",
+   "to": "app.gateway.usage:finish",
+   "type": "calls"
+  },
+  {
+   "from": "app.gateway.usage:finish",
+   "to": "outbox:usage-spool",
+   "type": "writes",
+   "note": "UsageWriter.submit",
+   "inferred": true
+  },
+  {
+   "from": "app.gateway.usage:UsageWriter",
+   "to": "table:request_logs",
+   "type": "writes"
+  },
+  {
+   "from": "app.api.common:admit",
+   "to": "table:request_logs",
+   "type": "reads",
+   "note": "sum_cost_since",
+   "inferred": true
+  },
+  {
+   "from": "app.memory.conversation_manager",
+   "to": "table:conversations",
+   "type": "reads",
+   "note": "via repository",
+   "inferred": true
+  },
+  {
+   "from": "app.memory.conversation_manager",
+   "to": "table:messages",
+   "type": "writes",
+   "note": "add_exchange via repository",
+   "inferred": true
+  },
+  {
+   "from": "app.database.repository",
+   "to": "table:conversations",
+   "type": "writes"
+  },
+  {
+   "from": "app.database.repository",
+   "to": "table:messages",
+   "type": "writes"
+  },
+  {
+   "from": "app.database.repository",
+   "to": "table:memories",
+   "type": "writes"
+  },
+  {
+   "from": "app.database.repository",
+   "to": "table:api_keys",
+   "type": "writes"
+  },
+  {
+   "from": "app.database.repository",
+   "to": "table:request_logs",
+   "type": "reads"
+  },
+  {
+   "from": "app.router.model_router:build_router",
+   "to": "app.providers.gemini",
+   "type": "routes_provider",
+   "note": "type=gemini",
+   "inferred": true
+  },
+  {
+   "from": "app.router.model_router:build_router",
+   "to": "app.providers.openai_compatible",
+   "type": "routes_provider",
+   "note": "type=openai_compatible",
+   "inferred": true
+  },
+  {
+   "from": "app.router.model_router:build_router",
+   "to": "app.providers.mock",
+   "type": "routes_provider",
+   "note": "type=mock",
+   "inferred": true
+  },
+  {
+   "from": "config:gateway.toml",
+   "to": "app.gateway.config",
+   "type": "configures",
+   "inferred": true
+  },
+  {
+   "from": "config:env",
+   "to": "app.config",
+   "type": "configures",
+   "inferred": true
+  },
+  {
+   "from": "deploy:compose",
+   "to": "config:gateway.toml",
+   "type": "configures",
+   "note": "mounted read-only",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_chat",
+   "to": "app.api.chat",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_chat",
+   "to": "app.api.conversations",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_openai_compat",
+   "to": "app.api.chat",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_openai_compat",
+   "to": "app.api.models",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_gateway_api",
+   "to": "app.auth",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_gateway_api",
+   "to": "app.api.common",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_gateway_api",
+   "to": "app.gateway.usage",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_gateway_api",
+   "to": "app.api.admin",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_gateway_api",
+   "to": "app.gateway.cache",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_gateway_api",
+   "to": "app.gateway.guardrails",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_gateway_api",
+   "to": "app.api.embeddings",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_router",
+   "to": "app.router.model_router",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_resilience",
+   "to": "app.router.model_router",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_resilience",
+   "to": "app.gateway.health",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_providers",
+   "to": "app.providers.gemini",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_providers",
+   "to": "app.providers.openai_compatible",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_memory",
+   "to": "app.memory.context_builder",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_memory",
+   "to": "app.memory.summarizer",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_memory",
+   "to": "app.memory.conversation_manager",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_formatting",
+   "to": "app.web.formatting",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_request_limits",
+   "to": "app.request_limits",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_postgres_integration",
+   "to": "app.gateway.usage",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_postgres_integration",
+   "to": "app.database.repository",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "app.api.chat:chat_completions",
+   "to": "app.api.chat:_complete",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.chat:_prepare_turn",
+   "to": "app.api.stateful:prepare_turn",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.chat:_complete",
+   "to": "app.api.stateful:maybe_summarize",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.chat:stream_chat_turn",
+   "to": "app.api.stateful:maybe_summarize",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.stateful:prepare_turn",
+   "to": "app.api.stateful:manager_for",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.stateful:prepare_turn",
+   "to": "app.memory.context_builder:build_context",
+   "type": "calls",
+   "note": "via _context_messages",
+   "inferred": true
+  },
+  {
+   "from": "app.api.stateful:maybe_summarize",
+   "to": "app.memory.summarizer",
+   "type": "calls",
+   "note": "summarize_conversation",
+   "inferred": true
+  },
+  {
+   "from": "app.api.stateful:maybe_summarize",
+   "to": "app.gateway.usage:UsageRecord.served_by",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.stateful:manager_for",
+   "to": "app.api.stateful:bound_user",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.stateful:owner_for",
+   "to": "app.api.stateful:bound_user",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.conversations",
+   "to": "app.api.stateful:manager_for",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.conversations",
+   "to": "app.api.stateful:owner_for",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.memories",
+   "to": "app.api.stateful:owner_for",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.chat:_complete",
+   "to": "app.gateway.usage:UsageRecord.served_by",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.embeddings",
+   "to": "app.gateway.usage:UsageRecord.served_by",
+   "type": "calls"
+  },
+  {
+   "from": "app.router.model_router:ModelRouter",
+   "to": "app.router.model_router:ModelRouter._plan",
+   "type": "calls"
+  },
+  {
+   "from": "app.router.model_router:ModelRouter",
+   "to": "app.router.model_router:required_capabilities",
+   "type": "calls"
+  },
+  {
+   "from": "app.router.model_router:ModelRouter._plan",
+   "to": "app.router.model_router:Deployment",
+   "type": "calls",
+   "note": "Deployment.supports",
+   "inferred": true
+  },
+  {
+   "from": "app.main",
+   "to": "app.database.database:init_db",
+   "type": "calls",
+   "note": "lifespan, apply=MIGRATE_ON_STARTUP"
+  },
+  {
+   "from": "app.ops",
+   "to": "app.database.database:init_db",
+   "type": "calls"
+  },
+  {
+   "from": "app.ops",
+   "to": "outbox:usage-spool",
+   "type": "writes",
+   "note": "reconcile/requeue",
+   "inferred": true
+  },
+  {
+   "from": "app.ops",
+   "to": "table:request_logs",
+   "type": "reads"
+  },
+  {
+   "from": "app.ops",
+   "to": "table:conversations",
+   "type": "writes",
+   "note": "retention deletes"
+  },
+  {
+   "from": "app.database.database:init_db",
+   "to": "app.database.database:MIGRATIONS",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.admin:rotate_key",
+   "to": "table:api_keys",
+   "type": "writes",
+   "note": "via repository",
+   "inferred": true
+  },
+  {
+   "from": "app.providers.openai_compatible",
+   "to": "app.providers.base:TokenUsage.reported",
+   "type": "calls",
+   "inferred": true
+  },
+  {
+   "from": "app.providers.gemini",
+   "to": "app.providers.base:TokenUsage.reported",
+   "type": "calls",
+   "inferred": true
+  },
+  {
+   "from": "app.api.admin",
+   "to": "app.database.repository:usage_summary",
+   "type": "calls"
+  },
+  {
+   "from": "deploy:compose",
+   "to": "deploy:caddyfile",
+   "type": "configures",
+   "note": "ingress profile",
+   "inferred": true
+  },
+  {
+   "from": "deploy:compose",
+   "to": "monitoring:alerts",
+   "type": "configures",
+   "note": "monitoring profile",
+   "inferred": true
+  },
+  {
+   "from": "deploy:dockerfile",
+   "to": "deps:lock",
+   "type": "configures",
+   "inferred": true
+  },
+  {
+   "from": "bench:stack",
+   "to": "config:bench.toml",
+   "type": "configures",
+   "inferred": true
+  },
+  {
+   "from": "script:restore-drill",
+   "to": "app.ops",
+   "type": "calls",
+   "note": "python -m app.ops verify",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_sdk_contract",
+   "to": "app.api.chat",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_sdk_contract",
+   "to": "app.api.embeddings",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_sdk_contract",
+   "to": "app.api.models",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_deployments",
+   "to": "app.router.model_router",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_deployments",
+   "to": "app.gateway.config",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_ownership",
+   "to": "app.api.stateful",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_ownership",
+   "to": "app.api.conversations",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_ownership",
+   "to": "app.api.memories",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_ownership",
+   "to": "app.api.admin",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_ownership",
+   "to": "app.main",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_accounting",
+   "to": "app.providers.gemini",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_accounting",
+   "to": "app.providers.openai_compatible",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_accounting",
+   "to": "app.database.repository",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_accounting",
+   "to": "app.gateway.usage",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_ops",
+   "to": "app.database.database",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_ops",
+   "to": "app.ops",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "app.api.admin",
+   "to": "app.auth:forget_key",
+   "type": "calls"
+  },
+  {
+   "from": "app.auth:authenticate",
+   "to": "table:api_keys",
+   "type": "reads",
+   "note": "cache miss only, via _lookup",
+   "inferred": true
+  },
+  {
+   "from": "app.api.admin:savings",
+   "to": "app.database.repository:savings_rows",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.admin:savings",
+   "to": "app.gateway.pricing",
+   "type": "calls",
+   "note": "request_cost",
+   "inferred": true
+  },
+  {
+   "from": "app.database.repository:savings_rows",
+   "to": "table:request_logs",
+   "type": "reads"
+  },
+  {
+   "from": "app.api.chat:_complete",
+   "to": "app.gateway.config:GatewayConfig.cache_ttl",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.chat",
+   "to": "app.gateway.config:GatewayConfig.output_cap",
+   "type": "calls",
+   "note": "_checked_generation_params"
+  },
+  {
+   "from": "tests.test_cost_controls",
+   "to": "app.api.admin",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_cost_controls",
+   "to": "app.api.chat",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_cost_controls",
+   "to": "app.gateway.cache",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_cost_controls",
+   "to": "app.gateway.config",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "route:DELETE /admin/cache",
+   "to": "app.api.admin",
+   "type": "routes_to",
+   "note": "clear_cache",
+   "auto": true
+  },
+  {
+   "from": "route:DELETE /admin/keys/{key_id}",
+   "to": "app.api.admin",
+   "type": "routes_to",
+   "note": "revoke_key",
+   "auto": true
+  },
+  {
+   "from": "route:DELETE /v1/conversations/{conversation_id}",
+   "to": "app.api.conversations",
+   "type": "routes_to",
+   "note": "delete_conversation",
+   "auto": true
+  },
+  {
+   "from": "route:GET /",
+   "to": "app.web.routes",
+   "type": "routes_to",
+   "note": "home",
+   "auto": true
+  },
+  {
+   "from": "route:GET /admin/keys",
+   "to": "app.api.admin",
+   "type": "routes_to",
+   "note": "list_keys",
+   "auto": true
+  },
+  {
+   "from": "route:GET /admin/models",
+   "to": "app.api.admin",
+   "type": "routes_to",
+   "note": "models",
+   "auto": true
+  },
+  {
+   "from": "route:GET /admin/providers",
+   "to": "app.api.admin",
+   "type": "routes_to",
+   "note": "providers",
+   "auto": true
+  },
+  {
+   "from": "route:GET /admin/savings",
+   "to": "app.api.admin",
+   "type": "routes_to",
+   "note": "savings",
+   "auto": true
+  },
+  {
+   "from": "route:GET /admin/usage",
+   "to": "app.api.admin",
+   "type": "routes_to",
+   "note": "usage",
+   "auto": true
+  },
+  {
+   "from": "route:GET /conversations/{conversation_id}",
+   "to": "app.web.routes",
+   "type": "routes_to",
+   "note": "view_conversation",
+   "auto": true
+  },
+  {
+   "from": "route:GET /health",
+   "to": "app.main",
+   "type": "routes_to",
+   "note": "health",
+   "auto": true
+  },
+  {
+   "from": "route:GET /metrics",
+   "to": "app.main",
+   "type": "routes_to",
+   "note": "metrics",
+   "auto": true
+  },
+  {
+   "from": "route:GET /ready",
+   "to": "app.main",
+   "type": "routes_to",
+   "note": "ready",
+   "auto": true
+  },
+  {
+   "from": "route:GET /v1/conversations/{conversation_id}",
+   "to": "app.api.conversations",
+   "type": "routes_to",
+   "note": "get_conversation",
+   "auto": true
+  },
+  {
+   "from": "route:GET /v1/conversations/{conversation_id}/messages",
+   "to": "app.api.conversations",
+   "type": "routes_to",
+   "note": "get_conversation_messages",
+   "auto": true
+  },
+  {
+   "from": "route:GET /v1/memories/{user_id}",
+   "to": "app.api.memories",
+   "type": "routes_to",
+   "note": "list_memories",
+   "auto": true
+  },
+  {
+   "from": "route:GET /v1/models",
+   "to": "app.api.models",
+   "type": "routes_to",
+   "note": "list_models",
+   "auto": true
+  },
+  {
+   "from": "route:POST /admin/keys",
+   "to": "app.api.admin",
+   "type": "routes_to",
+   "note": "create_key",
+   "auto": true
+  },
+  {
+   "from": "route:POST /admin/keys/{key_id}/rotate",
+   "to": "app.api.admin",
+   "type": "routes_to",
+   "note": "rotate_key",
+   "auto": true
+  },
+  {
+   "from": "route:POST /conversations",
+   "to": "app.web.routes",
+   "type": "routes_to",
+   "note": "create_conversation_ui",
+   "auto": true
+  },
+  {
+   "from": "route:POST /conversations/{conversation_id}/chat",
+   "to": "app.web.routes",
+   "type": "routes_to",
+   "note": "send_message_ui",
+   "auto": true
+  },
+  {
+   "from": "route:POST /conversations/{conversation_id}/chat/stream",
+   "to": "app.web.routes",
+   "type": "routes_to",
+   "note": "send_message_stream_ui",
+   "auto": true
+  },
+  {
+   "from": "route:POST /conversations/{conversation_id}/delete",
+   "to": "app.web.routes",
+   "type": "routes_to",
+   "note": "delete_conversation_ui",
+   "auto": true
+  },
+  {
+   "from": "route:POST /memories",
+   "to": "app.web.routes",
+   "type": "routes_to",
+   "note": "add_memory_ui",
+   "auto": true
+  },
+  {
+   "from": "route:POST /v1/chat/completions",
+   "to": "app.api.chat",
+   "type": "routes_to",
+   "note": "chat_completions",
+   "auto": true
+  },
+  {
+   "from": "route:POST /v1/conversations",
+   "to": "app.api.conversations",
+   "type": "routes_to",
+   "note": "create_conversation",
+   "auto": true
+  },
+  {
+   "from": "route:POST /v1/embeddings",
+   "to": "app.api.embeddings",
+   "type": "routes_to",
+   "note": "create_embeddings",
+   "auto": true
+  },
+  {
+   "from": "route:POST /v1/memories",
+   "to": "app.api.memories",
+   "type": "routes_to",
+   "note": "create_memory",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin",
+   "to": "app.api.common",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin",
+   "to": "app.auth",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin",
+   "to": "app.database.database",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin",
+   "to": "app.database.repository",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin",
+   "to": "app.gateway.pricing",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin",
+   "to": "app.providers.base",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin",
+   "to": "app.router.model_router",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.chat",
+   "to": "app.api.common",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.chat",
+   "to": "app.api.stateful",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.chat",
+   "to": "app.auth",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.chat",
+   "to": "app.database.database",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.chat",
+   "to": "app.database.models",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.chat",
+   "to": "app.database.repository",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.chat",
+   "to": "app.gateway.guardrails",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.chat",
+   "to": "app.gateway.structured",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.chat",
+   "to": "app.gateway.usage",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.chat",
+   "to": "app.memory.conversation_manager",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.chat",
+   "to": "app.observability",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.chat",
+   "to": "app.providers.base",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.chat",
+   "to": "app.router.model_router",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.chat",
+   "to": "app.schemas.chat",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.common",
+   "to": "app.auth",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.common",
+   "to": "app.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.common",
+   "to": "app.database.database",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.common",
+   "to": "app.database.repository",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.common",
+   "to": "app.gateway.cache",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.common",
+   "to": "app.gateway.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.common",
+   "to": "app.gateway.guardrails",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.common",
+   "to": "app.gateway.rate_limit",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.common",
+   "to": "app.gateway.usage",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.common",
+   "to": "app.observability",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.common",
+   "to": "app.providers.base",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.common",
+   "to": "app.router.model_router",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.conversations",
+   "to": "app.api.stateful",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.conversations",
+   "to": "app.auth",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.conversations",
+   "to": "app.database.database",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.conversations",
+   "to": "app.database.repository",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.conversations",
+   "to": "app.memory.conversation_manager",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.embeddings",
+   "to": "app.api.common",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.embeddings",
+   "to": "app.auth",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.embeddings",
+   "to": "app.database.database",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.embeddings",
+   "to": "app.gateway.guardrails",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.embeddings",
+   "to": "app.gateway.usage",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.embeddings",
+   "to": "app.observability",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.embeddings",
+   "to": "app.router.model_router",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.embeddings",
+   "to": "app.schemas.chat",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.memories",
+   "to": "app.api.common",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.memories",
+   "to": "app.api.stateful",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.memories",
+   "to": "app.auth",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.memories",
+   "to": "app.database.database",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.memories",
+   "to": "app.database.repository",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.memories",
+   "to": "app.gateway.guardrails",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.models",
+   "to": "app.auth",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.models",
+   "to": "app.router.model_router",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.stateful",
+   "to": "app.api.common",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.stateful",
+   "to": "app.auth",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.stateful",
+   "to": "app.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.stateful",
+   "to": "app.database.database",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.stateful",
+   "to": "app.database.models",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.stateful",
+   "to": "app.database.repository",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.stateful",
+   "to": "app.gateway.guardrails",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.stateful",
+   "to": "app.gateway.usage",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.stateful",
+   "to": "app.memory.context_builder",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.stateful",
+   "to": "app.memory.conversation_manager",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.stateful",
+   "to": "app.memory.summarizer",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.stateful",
+   "to": "app.router.model_router",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.stateful",
+   "to": "app.schemas.chat",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.auth",
+   "to": "app.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.auth",
+   "to": "app.database.database",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.auth",
+   "to": "app.database.models",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.auth",
+   "to": "app.database.repository",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.database.database",
+   "to": "app.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.database.database",
+   "to": "app.database.models",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.database.models",
+   "to": "app.database.database",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.database.repository",
+   "to": "app.database.models",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.cache",
+   "to": "app.gateway.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.config",
+   "to": "app.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.guardrails",
+   "to": "app.gateway.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.guardrails",
+   "to": "app.observability",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.guardrails",
+   "to": "app.providers.base",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.pricing",
+   "to": "app.gateway.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.pricing",
+   "to": "app.providers.base",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.usage",
+   "to": "app.auth",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.usage",
+   "to": "app.database.models",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.usage",
+   "to": "app.database.repository",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.usage",
+   "to": "app.gateway.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.usage",
+   "to": "app.gateway.pricing",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.usage",
+   "to": "app.gateway.rate_limit",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.usage",
+   "to": "app.observability",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.usage",
+   "to": "app.providers.base",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.main",
+   "to": "app.api.admin",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.main",
+   "to": "app.api.chat",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.main",
+   "to": "app.api.common",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.main",
+   "to": "app.api.conversations",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.main",
+   "to": "app.api.embeddings",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.main",
+   "to": "app.api.memories",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.main",
+   "to": "app.api.models",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.main",
+   "to": "app.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.main",
+   "to": "app.database.database",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.main",
+   "to": "app.gateway.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.main",
+   "to": "app.gateway.guardrails",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.main",
+   "to": "app.observability",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.main",
+   "to": "app.request_limits",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.main",
+   "to": "app.router.model_router",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.main",
+   "to": "app.web.routes",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.memory.conversation_manager",
+   "to": "app.database.models",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.memory.conversation_manager",
+   "to": "app.database.repository",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.memory.conversation_manager",
+   "to": "app.providers.base",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.memory.summarizer",
+   "to": "app.router.model_router",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.ops",
+   "to": "app.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.ops",
+   "to": "app.database.database",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.ops",
+   "to": "app.database.models",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.providers.gemini",
+   "to": "app.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.providers.gemini",
+   "to": "app.providers.base",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.providers.groq",
+   "to": "app.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.providers.groq",
+   "to": "app.providers.openai_compatible",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.providers.mock",
+   "to": "app.providers.base",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.providers.openai_compatible",
+   "to": "app.providers.base",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.router.model_router",
+   "to": "app.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.router.model_router",
+   "to": "app.gateway.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.router.model_router",
+   "to": "app.gateway.health",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.router.model_router",
+   "to": "app.gateway.pricing",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.router.model_router",
+   "to": "app.gateway.retry",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.router.model_router",
+   "to": "app.observability",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.router.model_router",
+   "to": "app.providers.base",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.router.model_router",
+   "to": "app.providers.gemini",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.router.model_router",
+   "to": "app.providers.groq",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.router.model_router",
+   "to": "app.providers.mock",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.router.model_router",
+   "to": "app.providers.openai_compatible",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.schemas.chat",
+   "to": "app.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.web.routes",
+   "to": "app.api.chat",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.web.routes",
+   "to": "app.api.common",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.web.routes",
+   "to": "app.database.database",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.web.routes",
+   "to": "app.database.repository",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.web.routes",
+   "to": "app.memory.conversation_manager",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.web.routes",
+   "to": "app.router.model_router",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.web.routes",
+   "to": "app.schemas.chat",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.web.routes",
+   "to": "app.web.formatting",
+   "type": "imports",
+   "auto": true
+  }
+ ]
+}

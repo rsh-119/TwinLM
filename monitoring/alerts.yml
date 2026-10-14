@@ -1,0 +1,55 @@
+# Prometheus alert rules for one gateway instance. Prometheus evaluates
+# them (Status > Alerts in its UI); delivering notifications needs an
+# Alertmanager and a destination (email/Slack/pager) - see docs/OPERATIONS.md.
+groups:
+  - name: twinlm
+    rules:
+      - alert: TwinLMDown
+        expr: up{job="twinlm"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: Gateway metrics endpoint is unreachable
+
+      - alert: TwinLMHighErrorRate
+        expr: |
+          sum(rate(llm_requests_total{status!="success"}[5m]))
+            / clamp_min(sum(rate(llm_requests_total[5m])), 1e-9) > 0.10
+          and sum(rate(llm_requests_total[5m])) > 0.05
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: More than 10% of gateway requests are failing
+
+      - alert: TwinLMProviderCircuitOpen
+        expr: llm_provider_health == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Provider {{ $labels.provider }} circuit has been open for 5 minutes"
+
+      - alert: TwinLMUsageBacklogGrowing
+        expr: llm_usage_backlog_rows > 1000
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: Usage rows are not reaching the database (check database health and disk)
+
+      - alert: TwinLMUsageDeadletter
+        expr: llm_usage_deadletter_rows > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: Usage rows were set aside; reconcile with `python -m app.ops outbox reconcile`
+
+      - alert: TwinLMUsageWriteFailures
+        expr: increase(llm_usage_write_failures_total[15m]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: Usage batches failed to write to the database
+
+      - alert: TwinLMUnpricedCalls
+        expr: increase(llm_unpriced_calls_total[1h]) > 0
+        labels: {severity: info}
+        annotations:
+          summary: "Calls to {{ $labels.provider }} have unknown cost; cost reports are incomplete"

@@ -13,6 +13,16 @@
   }
   .chat-header .id { font-size: 0.82rem; color: var(--muted); }
   .chat-header .id .mono { color: var(--text); }
+  .header-actions { display: flex; align-items: center; gap: 0.9rem; flex-shrink: 0; }
+  .token-total {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.78rem;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .token-count {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+  }
   .delete-conversation {
     background: transparent;
     color: var(--danger);
@@ -273,10 +283,13 @@
 {% block content %}
 <div class="chat-header">
   <div class="id">conversation <span class="mono">{{ conversation.id }}</span> · user <span class="mono">{{ conversation.user_id }}</span></div>
-  <form method="post" action="/conversations/{{ conversation.id }}/delete"
-        onsubmit="return confirm('Delete this conversation? This cannot be undone.');">
-    <button class="delete-conversation" type="submit">Delete</button>
-  </form>
+  <div class="header-actions">
+    <span class="token-total" id="token-total" title="Total tokens billed across this conversation">{{ "{:,}".format(total_tokens) }} tokens</span>
+    <form method="post" action="/conversations/{{ conversation.id }}/delete"
+          onsubmit="return confirm('Delete this conversation? This cannot be undone.');">
+      <button class="delete-conversation" type="submit">Delete</button>
+    </form>
+  </div>
 </div>
 
 {% if conversation.summary %}
@@ -292,6 +305,7 @@
       <div class="meta">
         <span>{{ m.role }}</span>
         {% if m.model %}<span class="badge tag-{{ m.model }}">{{ m.model }}</span>{% endif %}
+        {% if m.total_tokens %}<span class="token-count" title="{{ m.prompt_tokens }} prompt + {{ m.completion_tokens }} completion">{{ "{:,}".format(m.total_tokens) }} tokens</span>{% endif %}
       </div>
       {% if m.role == "assistant" %}
       <div class="bubble markdown-body">{{ m.content|render_message|safe }}</div>
@@ -366,6 +380,28 @@
     var textarea = form.querySelector("textarea[name=content]");
     var modelSelect = form.querySelector("select[name=model]");
     var sendButton = form.querySelector("button[type=submit]");
+    var tokenTotalEl = document.getElementById("token-total");
+    var tokenTotal = {{ total_tokens }};
+
+    function formatTokens(n) {
+      return n.toLocaleString();
+    }
+
+    function setTokenBadge(assistantEl, usage) {
+      var meta = assistantEl.querySelector(".meta");
+      if (!usage || meta.querySelector(".token-count")) return;
+      var span = document.createElement("span");
+      span.className = "token-count";
+      span.title = usage.prompt_tokens + " prompt + " + usage.completion_tokens + " completion";
+      span.textContent = formatTokens(usage.total_tokens) + " tokens";
+      meta.appendChild(span);
+    }
+
+    function bumpTokenTotal(usage) {
+      if (!usage) return;
+      tokenTotal += usage.total_tokens;
+      tokenTotalEl.textContent = formatTokens(tokenTotal) + " tokens";
+    }
 
     function scrollToBottom() {
       log.scrollTop = log.scrollHeight;
@@ -489,6 +525,10 @@
             scrollToBottom();
           } else if (event.done && !gotContent) {
             showError(assistantEl, "(empty response)");
+          }
+          if (event.done && event.usage) {
+            setTokenBadge(assistantEl, event.usage);
+            bumpTokenTotal(event.usage);
           }
         });
       } catch (err) {

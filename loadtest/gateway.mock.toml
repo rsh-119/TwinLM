@@ -1,0 +1,53 @@
+# Gateway config for load tests and key-less local runs: two mock providers,
+# no network. GATEWAY_CONFIG_PATH=loadtest/gateway.mock.toml
+request_timeout_seconds = 10
+routing_strategy = "priority"
+
+[retry]
+max_retries = 1
+backoff_base_seconds = 0.05
+backoff_max_seconds = 0.2
+
+[circuit_breaker]
+failure_threshold = 5
+cooldown_seconds = 5
+
+[providers.mock_a]
+type = "mock"
+default_model = "mock-a"
+mock_latency_seconds = 0.05
+mock_failure_rate = 0.02          # exercises retry/fallback under load
+
+[providers.mock_b]
+type = "mock"
+default_model = "mock-b"
+mock_latency_seconds = 0.1
+
+[models.auto]
+targets = ["mock_a", "mock_b"]
+
+[models.smart]
+targets = ["mock_a", "mock_b"]
+
+[models.embed]
+targets = ["mock_a"]
+
+[pricing."mock_a/mock-a"]
+input_per_million = 0.10
+output_per_million = 0.40
+
+[pricing."mock_b/mock-b"]
+input_per_million = 0.05
+output_per_million = 0.20
+
+[cache]
+enabled = true
+ttl_seconds = 300
+max_entries = 10000
+
+[guardrails.input]
+secrets = "block"
+prompt_injection = "log"
+
+[guardrails.output]
+secrets = "redact"

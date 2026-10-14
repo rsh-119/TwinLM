@@ -1,0 +1,227 @@
+{
+ "machine": {
+  "cpus": 4,
+  "platform": "win32"
+ },
+ "cold_start_to_ready_s": 15.33,
+ "gateway_restart_to_ready_s": 5.54,
+ "idle": {
+  "gateway-1": {
+   "cpu": "0.17%",
+   "mem": "76.48MiB"
+  },
+  "postgres-1": {
+   "cpu": "0.02%",
+   "mem": "69.13MiB"
+  }
+ },
+ "gateway_added_latency": {
+  "requests": 300,
+  "chat_p50_ms": 14.4,
+  "chat_p95_ms": 27.6,
+  "chat_p99_ms": 37.4,
+  "health_p50_ms": 2.4,
+  "health_p95_ms": 3.6
+ },
+ "concurrency": [
+  {
+   "users": 1,
+   "requests": 209,
+   "rps": 13.9,
+   "p50": 71.5,
+   "p95": 81.0,
+   "p99": 98.7,
+   "error_rate": 0.0,
+   "statuses": {
+    "200": 209
+   }
+  },
+  {
+   "users": 10,
+   "requests": 935,
+   "rps": 62.0,
+   "p50": 142.7,
+   "p95": 287.5,
+   "p99": 354.6,
+   "error_rate": 0.0,
+   "statuses": {
+    "200": 935
+   }
+  },
+  {
+   "users": 50,
+   "requests": 1023,
+   "rps": 66.5,
+   "p50": 725.0,
+   "p95": 1008.8,
+   "p99": 1176.7,
+   "error_rate": 0.0,
+   "statuses": {
+    "200": 1023
+   }
+  },
+  {
+   "users": 100,
+   "requests": 1914,
+   "rps": 106.0,
+   "p50": 149.9,
+   "p95": 2712.7,
+   "p99": 3563.8,
+   "error_rate": 0.6,
+   "statuses": {
+    "200": 777,
+    "503": 1137
+   }
+  }
+ ],
+ "under_load": {
+  "gateway-1": {
+   "cpu": "0.21%",
+   "mem": "88.19MiB"
+  },
+  "postgres-1": {
+   "cpu": "0.05%",
+   "mem": "81.07MiB"
+  }
+ },
+ "provider_outage": {
+  "users": 10,
+  "requests": 903,
+  "rps": 59.571,
+  "p50": 154.171,
+  "p95": 271.826,
+  "p99": 327.928,
+  "error_rate": 0.0,
+  "statuses": {
+   "200": 903
+  },
+  "served_by": {
+   "instant": 320,
+   "slow50": 3847
+  },
+  "breaker": [
+   {
+    "provider": "instant",
+    "state": "closed",
+    "available": true,
+    "consecutive_failures": 0,
+    "total_requests": 320,
+    "total_failures": 0,
+    "error_rate": 0.0,
+    "in_flight": 0,
+    "latency_ewma_ms": 0.0,
+    "last_success_at": 1791980003.6088862,
+    "last_error": null
+   },
+   {
+    "provider": "slow50",
+    "state": "closed",
+    "available": true,
+    "consecutive_failures": 0,
+    "total_requests": 3847,
+    "total_failures": 0,
+    "error_rate": 0.0,
+    "in_flight": 0,
+    "latency_ewma_ms": 69.0,
+    "last_success_at": 1791980092.856496,
+    "last_error": null
+   },
+   {
+    "provider": "down",
+    "state": "open",
+    "available": true,
+    "consecutive_failures": 7,
+    "total_requests": 7,
+    "total_failures": 7,
+    "error_rate": 1.0,
+    "in_flight": 0,
+    "latency_ewma_ms": null,
+    "last_success_at": null,
+    "last_error": "down simulated failure"
+   }
+  ]
+ },
+ "database_outage": {
+  "stopped_at_s": 5,
+  "restarted_at_s": 15,
+  "first_all_ok_second": 24,
+  "timeline": {
+   "0": {
+    "200": 42
+   },
+   "1": {
+    "200": 56
+   },
+   "2": {
+    "200": 62
+   },
+   "3": {
+    "200": 70
+   },
+   "4": {
+    "200": 75
+   },
+   "5": {
+    "200": 49,
+    "500": 5
+   },
+   "6": {
+    "RemoteProtocolError": 15,
+    "500": 20
+   },
+   "10": {
+    "RemoteProtocolError": 10,
+    "500": 10
+   },
+   "14": {
+    "RemoteProtocolError": 9,
+    "500": 10
+   },
+   "18": {
+    "RemoteProtocolError": 5,
+    "500": 4
+   },
+   "19": {
+    "RemoteProtocolError": 5,
+    "500": 6
+   },
+   "23": {
+    "RemoteProtocolError": 10,
+    "200": 56
+   },
+   "24": {
+    "200": 70
+   },
+   "25": {
+    "200": 56
+   },
+   "26": {
+    "200": 62
+   },
+   "27": {
+    "200": 54
+   },
+   "28": {
+    "200": 59
+   },
+   "29": {
+    "200": 55
+   },
+   "30": {
+    "200": 53
+   },
+   "31": {
+    "200": 65
+   },
+   "32": {
+    "200": 69
+   },
+   "33": {
+    "200": 66
+   },
+   "34": {
+    "200": 69
+   }
+  }
+ }
+}

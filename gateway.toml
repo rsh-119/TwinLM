@@ -1,0 +1,127 @@
+# TwinLM gateway behavior. Secrets do NOT go here: providers name the
+# environment setting that holds their key (api_key_setting).
+
+request_timeout_seconds = 60          # total deadline per request, across retries/fallbacks
+routing_strategy = "priority"         # priority | latency | cost | load
+# Output-token cap: requests without max_tokens get it, larger ones are
+# clamped (the reply then ends with finish_reason "length"). Aliases can
+# set their own `max_output_tokens`. Reasoning models count their thinking
+# against this on some providers - raise it for those aliases.
+default_max_output_tokens = 4096
+
+[retry]
+max_retries = 1                       # same-deployment retries before trying the next deployment/group (429s skip straight on)
+backoff_base_seconds = 0.2
+backoff_max_seconds = 2.0
+
+[circuit_breaker]
+failure_threshold = 5                 # consecutive availability failures before opening
+cooldown_seconds = 30                 # open -> half-open after this long
+
+[providers.gemini]
+type = "gemini"
+default_model = "gemini-flash-latest"
+api_key_setting = "gemini_api_key"
+timeout_seconds = 30
+capabilities = ["chat", "tools", "vision"]   # embeddings via the deployment below
+
+[providers.groq]
+type = "openai_compatible"
+base_url = "https://api.groq.com/openai/v1"
+default_model = "openai/gpt-oss-20b"
+api_key_setting = "groq_api_key"
+timeout_seconds = 30
+capabilities = ["chat", "tools"]      # gpt-oss: no image input; Groq has no embeddings API
+
+# Add more OpenAI-compatible providers the same way, e.g.:
+# [providers.openai]
+# type = "openai_compatible"
+# base_url = "https://api.openai.com/v1"
+# default_model = "gpt-4o-mini"
+# api_key_setting = "openai_api_key"
+#
+# [providers.ollama]
+# type = "openai_compatible"
+# base_url = "http://localhost:11434/v1"
+# default_model = "llama3.2"
+
+# Deployments: a named (provider, model) with its own capabilities. Its id
+# appears in request logs and /admin/models and can be pinned as `model`.
+# Unnamed "provider/model" targets get the id "provider/model".
+[deployments.gemini-embedding]
+provider = "gemini"
+model = "gemini-embedding-001"
+capabilities = ["embeddings"]
+
+# Model aliases: what clients pass as `model`.
+# - `targets`: tried in order, each a fallback for the previous one.
+# - `groups`: model groups. Deployments in one group serve the same model
+#   (e.g. two endpoints/credentials); they are tried before falling back to
+#   the next group. Example with a second OpenAI credential:
+#     [models.mini]
+#     groups = [["openai/gpt-4o-mini", "openai-backup/gpt-4o-mini"], ["groq/openai/gpt-oss-20b"]]
+# routing_strategy reorders deployments within a group and groups by their
+# best member; "priority" keeps this order. Deployments whose provider
+# circuit is open, or that lack a capability the request needs (tools,
+# vision, embeddings), are skipped. A deployment id, provider name
+# ("gemini") or "provider/model" can also be passed directly, which pins
+# that deployment with no fallback.
+[models.auto]
+targets = ["gemini", "groq"]
+description = "Default: Gemini, falling back to Groq"
+
+[models.smart]
+targets = ["gemini/gemini-flash-latest", "groq/openai/gpt-oss-20b"]
+description = "General-purpose / reasoning"
+
+[models.fast]
+targets = ["groq/openai/gpt-oss-20b", "gemini/gemini-flash-latest"]
+description = "Lowest latency first"
+
+[models.embed]
+targets = ["gemini-embedding"]
+description = "Embeddings"
+
+# USD per million tokens, keyed "provider/model". These are example values -
+# verify against each provider's current price list before relying on cost
+# reports. Models without an entry are tracked with cost = null.
+[pricing."gemini/gemini-flash-latest"]
+input_per_million = 0.30
+output_per_million = 2.50
+
+[pricing."groq/openai/gpt-oss-20b"]
+input_per_million = 0.075
+output_per_million = 0.30
+
+# The model you would otherwise send everything to. GET /admin/savings
+# compares actual cost with these tokens priced at this model. Example
+# price - verify it.
+[pricing."openai/gpt-4o"]
+input_per_million = 2.50
+output_per_million = 10.00
+
+[savings]
+baseline = "openai/gpt-4o"
+
+[rate_limits]
+# default_rpm = 60
+# default_tpm = 100000
+
+[cache]
+enabled = true                        # exact match; only stateless, non-streaming, temperature unset/0, no tools/sensitive data
+ttl_seconds = 300
+max_entries = 1000
+
+[guardrails]
+max_input_chars = 200000
+
+[guardrails.input]
+secrets = "block"                     # don't forward credentials to third-party providers
+pii = "log"
+prompt_injection = "log"
+
+[guardrails.output]
+secrets = "redact"
+
+[structured_output]
+max_repair_attempts = 1
