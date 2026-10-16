@@ -33,6 +33,7 @@ docker compose logs -f gateway
 | `llm_provider_health` | Circuit-breaker state per provider |
 | `llm_active_requests` | Requests in flight |
 | `llm_rate_limited_total` | Requests rejected by RPM, TPM or budget |
+| `llm_budget_alerts_total` | Budget alerts sent, by threshold (80, 100) |
 | `llm_guardrail_violations_total` | Guardrail findings |
 | `llm_structured_output_failures_total` | Replies that stayed invalid after repair |
 

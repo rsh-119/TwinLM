@@ -198,6 +198,17 @@ Defaults for keys that don't set their own limits; omitted = unlimited.
 | `max_entries` | `1000` | LRU entry cap |
 | `max_bytes` | `16777216` | Total size cap |
 
+### `[cache.semantic]`
+
+Opt-in [semantic cache](/docs/caching/#semantic-cache). Needs `[cache] enabled = true`.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `models` | `[]` (off) | Aliases that may reuse answers to similarly worded questions |
+| `embedding_model` | `"embed"` | Alias or deployment with the `embeddings` capability |
+| `min_similarity` | `0.95` | Cosine similarity needed for a hit, 0–1. Lower = more hits and more wrong ones |
+| `max_entries` | `1000` | Entries kept per instance |
+
 ## `[guardrails]`
 
 | Key | Meaning |

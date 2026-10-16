@@ -1,0 +1,94 @@
+export const metadata = { title: "Budgets and alerts" };
+
+# Budgets and alerts
+
+A budget is a spending limit in US dollars for a day or a month. When a request would take spend past the limit,
+TwinLM refuses it before it reaches the provider, so one runaway app or a forgotten loop can't run up the bill.
+Alerts tell you at 80% and when the limit is reached.
+
+## Kinds of budget
+
+| Budget | Covers | Period |
+| --- | --- | --- |
+| **API key** | One key: `daily_budget_usd` on the key ([Keys](/docs/keys/)) | Day |
+| **Team** | Every key in a team (project), including members' playground use | Day or month |
+| **Person** | One person's personal keys and their playground use | Day or month |
+| **Whole company** | All traffic through the gateway | Day or month |
+
+Every budget that applies to a request is checked, so a team can have a monthly limit while each of its keys has a
+smaller daily one. Days and months are UTC; a monthly budget resets on the 1st.
+
+## Setting a budget
+
+In the console, admins open **Budgets → Add budget**, choose who it applies to, the period and the limit. Or with
+the [Admin API](/docs/admin-api/#budgets):
+
+```bash
+# $500 a month for the support team
+curl -X PUT http://localhost:8000/admin/budgets -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"scope": "team", "target": "support", "period": "monthly", "limit_usd": 500}'
+
+# $2,000 a month for everything
+curl -X PUT http://localhost:8000/admin/budgets -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"scope": "org", "period": "monthly", "limit_usd": 2000}'
+```
+
+`PUT` creates the budget or changes its limit. `scope` is `team` (target = team name), `user` (target = user id)
+or `org` (no target).
+
+## How a request is checked
+
+Before a request goes out, TwinLM adds up, for each budget that applies:
+
+1. **settled spend** this period, from the usage log;
+2. spend from requests that finished but are **still being written**;
+3. the **reserved** cost of requests still running;
+4. **this request's worst case**: its input (about one token per three characters) plus its output cap
+   (`max_tokens`, or `default_max_output_tokens`), priced at the most expensive model its alias may fall back to.
+
+If that total would pass the limit, the request gets **429** with a message naming the budget, for example
+`team 'support' monthly budget exceeded`. Otherwise its worst case is reserved while it runs and replaced by the
+real cost when it finishes. Because running requests are counted, a burst of concurrent requests can't overshoot
+the limit together.
+
+<Note title="When a budget is a hard stop">
+Budgets hold for models with a [price](/docs/config/) and an output cap. Without an output cap only the
+input is reserved, so one long reply can go over. A model without a price has an unknown cost: it reserves nothing
+and only stops the next request once spend is recorded. Keep provider-side spend limits as a backstop.
+</Note>
+
+Near the limit, requests can be refused while spend shows below 100%: the next request's worst case doesn't fit
+in what is left. The console then shows the budget as **Limit reached**.
+
+## Alerts
+
+Each budget sends an alert **once per period** when spend reaches **80%**, and again at **100%** or at the first
+refused request, whichever comes first. An alert:
+
+- appears in the console under **Budgets → Alerts** and in `GET /admin/budget-alerts`;
+- is logged as a warning and counted in the `llm_budget_alerts_total` metric;
+- is POSTed to `BUDGET_ALERT_WEBHOOK_URL`, if set.
+
+The webhook body is JSON with a Slack-style `text` field, so a Slack or Microsoft Teams incoming webhook shows it
+as a message:
+
+```json
+{
+  "text": "TwinLM: team 'support' monthly budget at 80% ($400.12 of $500.00)",
+  "budget_id": "bud_…",
+  "budget": "team 'support' monthly",
+  "threshold_pct": 80,
+  "spent_usd": 400.12,
+  "limit_usd": 500.0
+}
+```
+
+Delivery is one attempt, in the background. If it fails, the alert still appears in the console and the logs.
+
+## Seeing spend
+
+Admins see every budget on the **Budgets** page with spend this period, money held for requests in progress, and
+when it resets. Team members see their team's budget and their own on the team page. The same data comes from
+`GET /admin/budgets`.

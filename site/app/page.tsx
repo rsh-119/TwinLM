@@ -55,8 +55,8 @@ const LEVERS = [
   {
     figure: "1 key",
     title: "per app or team",
-    body: "Every request is recorded with tokens, cost and latency per key, project and model. A daily spend limit pauses a key once it is reached.",
-    config: 'POST /admin/keys  {"project": "support"}',
+    body: "Every request is recorded with tokens, cost and latency per key, project and model. Monthly budgets per team, person or company refuse a request before it would cross the limit, with alerts at 80%.",
+    config: 'PUT /admin/budgets\n{"scope": "team",\n "target": "support",\n "limit_usd": 500}',
   },
 ];
 
@@ -67,11 +67,14 @@ const FEATURES: [string, string][] = [
   ["Model aliases with routing by priority, latency, cost or load", "gateway.toml"],
   ["Retries, circuit breakers and fallback across providers", "gateway.toml"],
   ["Exact-match cache for deterministic requests, TTL per alias", "/admin/cache"],
+  ["Semantic cache, opt-in per alias, for questions asked in different words", "[cache.semantic]"],
+  ["Budgets per team, person or company, with alerts at 80% and 100%", "/admin/budgets"],
   ["Output-token caps, globally or per alias", "gateway.toml"],
   ["Savings report against the model you would otherwise use", "/admin/savings"],
   ["Web console: sign-in, teams and members with roles, keys and spend per team", "/app"],
   ["Add providers from the console with just an API key, live, no restart", "/app/providers"],
   ["Day-zero models: any model name a provider ships works the same day", "any model"],
+  ["Several instances behind a load balancer, sharing state through Redis", "REDIS_URL"],
   ["Your own models (Ollama, vLLM, fine-tunes) behind the same key", "custom endpoint"],
 ];
 
@@ -90,7 +93,7 @@ const FAQ: [string, string][] = [
   ],
   [
     "Will caching give users stale answers?",
-    "Only deterministic requests without tools, streaming or sensitive content are cached, and each alias sets its own expiry or turns caching off. Requests meant to vary always reach the model.",
+    "Only deterministic requests without tools, streaming or sensitive content are cached, and each alias sets its own expiry or turns caching off. Requests meant to vary always reach the model. The semantic cache, which also matches differently worded questions, is off unless you turn it on for a specific alias.",
   ],
   [
     "How much will we actually save?",
@@ -98,7 +101,7 @@ const FAQ: [string, string][] = [
   ],
   [
     "Is it production-ready?",
-    "TwinLM is young. It has an automated test suite, versioned database migrations, backup and restore scripts, and has been load-tested on one instance with simulated providers. One instance is the supported setup today. If it will carry critical traffic, talk to us first.",
+    "TwinLM is young. It has an automated test suite, versioned database migrations, backup and restore scripts, and has been load-tested on one instance with simulated providers. Several instances can share state through Redis; that is tested but not yet load-tested. If it will carry critical traffic, talk to us first.",
   ],
 ];
 

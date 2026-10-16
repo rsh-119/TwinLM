@@ -1,0 +1,47 @@
+export const metadata = { title: "Running several instances" };
+
+# Running several instances
+
+One gateway instance is the default and handles a lot of traffic ([Performance](/docs/performance/)). Run several
+behind a load balancer when you need more capacity, or so one can restart while the others keep serving.
+
+## What you need
+
+- **PostgreSQL**, shared by every instance (`DATABASE_URL`). SQLite works for one instance only.
+- **Redis 6.2 or newer**, shared by every instance: set `REDIS_URL`, for example `redis://redis:6379/0`.
+- The **same `gateway.toml`, `ADMIN_TOKEN` and `PROVIDER_KEYS_SECRET`** on every instance.
+- Each instance's own `USAGE_SPOOL_PATH` on its own disk (the local usage outbox).
+
+The startup log shows `shared_state=redis` when Redis is in use.
+
+## What is shared
+
+| With `REDIS_URL` | Effect |
+| --- | --- |
+| Rate limits (RPM, TPM) | A key's limit holds across all instances, not once per instance |
+| Response cache | An answer cached by one instance is served by all |
+| [Budget](/docs/budgets/) reservations | Requests running on other instances count against budgets |
+| Key revocation | A revoked key stops working on every instance at once |
+| Console changes to providers, models and prices | Other instances reload within 5 seconds |
+
+## What stays per instance
+
+- **Circuit breakers and latency statistics.** Each instance learns provider health from its own traffic, so one
+  may still try a provider that another has already marked as down.
+- **The [semantic cache](/docs/caching/#semantic-cache).** Each instance builds its own.
+- **The usage outbox.** Each instance writes its own usage records to the shared database.
+
+## If Redis goes down
+
+The gateway keeps serving. Rate limits and the shared cache **fail open**: requests are served without limits and
+without caching, and budgets still count settled spend but not other instances' running requests. Each failure is
+logged. After a connection error the gateway skips Redis for 10 seconds, so an outage costs one short connection
+attempt instead of slowing every request. When Redis is back, sharing resumes on its own.
+
+Redis holds no data that matters long term: rate-limit windows, cache entries and reservations all expire on
+their own. It needs no backup.
+
+<Note title="Tested, not yet load-tested">
+Two instances sharing PostgreSQL and Redis have been tested for shared rate limits, cache, budgets, revocation,
+configuration reloads and a Redis outage. Throughput with several instances hasn't been benchmarked yet.
+</Note>

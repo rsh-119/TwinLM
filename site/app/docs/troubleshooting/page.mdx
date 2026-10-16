@@ -18,7 +18,8 @@ Every response, including errors, has an `X-Request-ID` header: search the logs 
 | 404 | Conversation not found in this project, unknown key id, or `/admin/savings` without a baseline | Check ids; set `[savings] baseline` |
 | 409 | Two concurrent turns on one conversation | Retry the second turn |
 | 413 | Request body over 1 MiB | Send less, or images as URLs where the provider allows |
-| 429 | Rate limit or daily budget exceeded | Wait for `Retry-After`; raise the key's limits |
+| 429 rate limit | Requests or tokens per minute exceeded | Wait for `Retry-After`; raise the key's limits |
+| 429 `… budget exceeded` | A key, team, person or company [budget](/docs/budgets/) would be crossed | Wait for the period to reset, or raise the budget on the console's Budgets page |
 | 502 | Unexpected upstream error, an output guardrail blocked the reply, or structured output stayed invalid | Check the logs for the request ID |
 | 503 `server busy` | More than `MAX_CONCURRENT_REQUESTS` in flight | Raise the limit or slow the client |
 | 503 provider unavailable | Every target failed or has an open circuit | Check `GET /admin/providers` and provider status |

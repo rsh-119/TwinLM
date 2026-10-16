@@ -125,8 +125,9 @@ Any other reverse proxy (nginx, Traefik, a cloud load balancer) works too: forwa
 
 1. **Back up** PostgreSQL off the host on a schedule ([Operations](/docs/operations/#backup-and-restore)).
 2. **TLS** in front of the gateway, with only `/v1` exposed.
-3. **One key per app**, with `rpm_limit`, `tpm_limit` and `daily_budget_usd` ([Keys](/docs/keys/)).
+3. **One key per app**, with `rpm_limit`, `tpm_limit` and `daily_budget_usd` ([Keys](/docs/keys/)), and a monthly
+   [budget](/docs/budgets/) per team with `BUDGET_ALERT_WEBHOOK_URL` set.
 4. **Verify prices** in `[pricing]` against your providers' current lists.
-5. **Provider-side spend limits** as the hard stop; TwinLM's budget is advisory.
+5. **Provider-side spend limits** as a backstop; TwinLM's budgets don't cover unpriced models.
 6. **Alerts** delivered somewhere a person will see them ([Monitoring](/docs/monitoring/)).
-7. **One gateway instance.** Do not scale horizontally yet ([Performance](/docs/performance/)).
+7. **One gateway instance** unless you need more; then PostgreSQL plus `REDIS_URL` ([Running several instances](/docs/scaling/)).

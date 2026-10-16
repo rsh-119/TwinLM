@@ -16,7 +16,9 @@ host, an SSH tunnel or the test console.
 | `GET /admin/savings` | Actual cost vs. a baseline model |
 | `GET /admin/providers` | Provider health and circuit-breaker state |
 | `GET /admin/models` | Aliases, groups, deployments, capabilities and prices |
-| `DELETE /admin/cache` | Clear the response cache |
+| `DELETE /admin/cache` | Clear the response cache (exact and semantic) |
+| `GET /admin/budgets`, `PUT /admin/budgets`, `DELETE /admin/budgets/{id}` | Team, person and company budgets ([below](#budgets)) |
+| `GET /admin/budget-alerts` | Budget alerts, newest first |
 | `/admin/config/…` | Providers, models and prices managed at runtime ([below](#runtime-configuration)) |
 
 ## POST /admin/keys
@@ -33,7 +35,7 @@ curl -X POST http://localhost:8000/admin/keys -H "Authorization: Bearer $ADMIN_T
 | `project` | string, 1–100 | required; `default` is reserved |
 | `allowed_models` | list of strings | omitted = every model |
 | `rpm_limit`, `tpm_limit` | integer > 0 | omitted = `[rate_limits]` defaults |
-| `daily_budget_usd` | number ≥ 0 | advisory |
+| `daily_budget_usd` | number ≥ 0 | spending limit per UTC day ([Budgets](/docs/budgets/)) |
 | `user_id` | string, 1–128 | makes the key user-bound |
 
 Response (201):
@@ -98,6 +100,44 @@ capabilities, and configured prices.
 ## DELETE /admin/cache
 
 Empties the response cache. Returns `{"cleared": <entries removed>}`.
+
+## Budgets
+
+`PUT /admin/budgets` creates a budget or changes its limit; the key is (`scope`, `target`, `period`).
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `scope` | `team`, `user` or `org` | required |
+| `target` | string | team name or user id; ignored for `org` |
+| `period` | `daily` or `monthly` | default `monthly` (UTC) |
+| `limit_usd` | number > 0 | required |
+
+`GET /admin/budgets` and the `PUT` response return each budget with its spend this period:
+
+```json
+{
+  "id": "bud_…",
+  "scope": "team",
+  "target": "support",
+  "period": "monthly",
+  "label": "team 'support' monthly",
+  "limit_usd": 500.0,
+  "spent_usd": 412.3,
+  "reserved_usd": 0.42,
+  "used_pct": 82.5,
+  "limit_reached": false,
+  "period_start": "2026-10-01T00:00:00+00:00",
+  "resets_at": "2026-11-01T00:00:00+00:00"
+}
+```
+
+`reserved_usd` is held for requests in progress. `limit_reached` is true once a request was refused this period.
+`DELETE /admin/budgets/{id}` removes a budget and its alerts.
+
+`GET /admin/budget-alerts?limit=50` lists alerts: `budget`, `threshold_pct` (80 or 100), `spent_usd`,
+`limit_usd`, `period_start` and `created_at`.
+
+Signed-in team members read their team's and their own budgets with `GET /console/teams/{id}/budgets`.
 
 ## Runtime configuration
 

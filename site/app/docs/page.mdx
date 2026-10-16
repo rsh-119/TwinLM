@@ -55,8 +55,8 @@ hard-code a provider, so you can switch to a cheaper model without redeploying a
 ## Honest limits
 
 <Note title="Know before you deploy">
-One gateway instance is the supported setup: rate limits, circuit breakers and the cache live in process memory.
-The daily budget is advisory (concurrent requests can overshoot it); use your provider's spend limits as the hard
-stop. Costs are estimates from the prices you configure. There is no SSO, no semantic cache and no `n > 1`.
-Details: [Performance and limits](/docs/performance/).
+One gateway instance is the default; several can share state through Redis, which is tested but not yet
+load-tested ([Running several instances](/docs/scaling/)). [Budgets](/docs/budgets/) are a hard stop only for priced
+models with an output cap, so keep your provider's spend limits as a backstop. Costs are estimates from the prices
+you configure. There is no SSO and no `n > 1`. Details: [Performance and limits](/docs/performance/).
 </Note>
