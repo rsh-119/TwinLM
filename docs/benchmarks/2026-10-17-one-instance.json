@@ -1,0 +1,243 @@
+{
+ "machine": {
+  "cpus": 4,
+  "platform": "win32"
+ },
+ "instances": 1,
+ "cold_start_to_ready_s": 19.14,
+ "gateway_restart_to_ready_s": 7.22,
+ "idle": {
+  "gateway-1": {
+   "cpu": "0.89%",
+   "mem": "91.13MiB"
+  },
+  "postgres-1": {
+   "cpu": "4.28%",
+   "mem": "35.88MiB"
+  }
+ },
+ "gateway_added_latency": {
+  "requests": 300,
+  "chat_p50_ms": 10.7,
+  "chat_p95_ms": 21.7,
+  "chat_p99_ms": 40.8,
+  "health_p50_ms": 3.7,
+  "health_p95_ms": 6.7
+ },
+ "concurrency": [
+  {
+   "users": 1,
+   "requests": 219,
+   "rps": 14.6,
+   "p50": 65.7,
+   "p95": 86.9,
+   "p99": 135.8,
+   "error_rate": 0.0,
+   "statuses": {
+    "200": 219
+   }
+  },
+  {
+   "users": 10,
+   "requests": 969,
+   "rps": 63.3,
+   "p50": 129.2,
+   "p95": 314.4,
+   "p99": 462.8,
+   "error_rate": 0.0,
+   "statuses": {
+    "200": 969
+   }
+  },
+  {
+   "users": 50,
+   "requests": 1606,
+   "rps": 105.0,
+   "p50": 432.0,
+   "p95": 716.5,
+   "p99": 846.5,
+   "error_rate": 0.0,
+   "statuses": {
+    "200": 1606
+   }
+  },
+  {
+   "users": 100,
+   "requests": 1481,
+   "rps": 94.2,
+   "p50": 884.4,
+   "p95": 1996.2,
+   "p99": 2533.9,
+   "error_rate": 0.0,
+   "statuses": {
+    "200": 1481
+   }
+  }
+ ],
+ "under_load": {
+  "gateway-1": {
+   "cpu": "0.26%",
+   "mem": "105.8MiB"
+  },
+  "postgres-1": {
+   "cpu": "0.12%",
+   "mem": "58.7MiB"
+  }
+ },
+ "provider_outage": {
+  "users": 10,
+  "requests": 870,
+  "rps": 57.267,
+  "p50": 156.911,
+  "p95": 292.438,
+  "p99": 359.765,
+  "error_rate": 0.0,
+  "statuses": {
+   "200": 870
+  },
+  "served_by": {
+   "instant": 320,
+   "slow50": 5145
+  },
+  "breaker": [
+   {
+    "provider": "instant",
+    "state": "closed",
+    "available": true,
+    "consecutive_failures": 0,
+    "total_requests": 320,
+    "total_failures": 0,
+    "error_rate": 0.0,
+    "in_flight": 0,
+    "latency_ewma_ms": 0.0,
+    "last_success_at": 1792175941.997055,
+    "last_error": null
+   },
+   {
+    "provider": "slow50",
+    "state": "closed",
+    "available": true,
+    "consecutive_failures": 0,
+    "total_requests": 5145,
+    "total_failures": 0,
+    "error_rate": 0.0,
+    "in_flight": 0,
+    "latency_ewma_ms": 88.6,
+    "last_success_at": 1792176031.4339814,
+    "last_error": null
+   },
+   {
+    "provider": "down",
+    "state": "open",
+    "available": true,
+    "consecutive_failures": 7,
+    "total_requests": 7,
+    "total_failures": 7,
+    "error_rate": 1.0,
+    "in_flight": 0,
+    "latency_ewma_ms": null,
+    "last_success_at": null,
+    "last_error": "down simulated failure"
+   }
+  ]
+ },
+ "database_outage": {
+  "stopped_at_s": 5,
+  "restarted_at_s": 15,
+  "first_all_ok_second": 19,
+  "timeline": {
+   "0": {
+    "200": 15
+   },
+   "1": {
+    "200": 66
+   },
+   "2": {
+    "200": 61
+   },
+   "3": {
+    "200": 70
+   },
+   "4": {
+    "200": 80
+   },
+   "5": {
+    "200": 79
+   },
+   "6": {
+    "200": 47
+   },
+   "7": {
+    "200": 54
+   },
+   "8": {
+    "200": 90
+   },
+   "9": {
+    "200": 87
+   },
+   "10": {
+    "200": 82
+   },
+   "11": {
+    "200": 13
+   },
+   "19": {
+    "200": 61
+   },
+   "20": {
+    "200": 84
+   },
+   "21": {
+    "200": 96
+   },
+   "22": {
+    "200": 69
+   },
+   "23": {
+    "200": 69
+   },
+   "24": {
+    "200": 73
+   },
+   "25": {
+    "200": 79
+   },
+   "26": {
+    "200": 80
+   },
+   "27": {
+    "200": 67
+   },
+   "28": {
+    "200": 76
+   },
+   "29": {
+    "200": 77
+   },
+   "30": {
+    "200": 80
+   },
+   "31": {
+    "200": 81
+   },
+   "32": {
+    "200": 79
+   },
+   "33": {
+    "200": 80
+   },
+   "34": {
+    "200": 80
+   }
+  },
+  "outbox_after": {
+   "gateway": {
+    "pending": 0,
+    "deadletter": 0
+   }
+  },
+  "outage_requests_sent": 1975
+ },
+ "request_logs_total": 7440
+}

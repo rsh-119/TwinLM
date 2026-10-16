@@ -545,12 +545,17 @@ limits and the cache fail open (requests are served, unlimited and uncached)
 and the gateway logs it; Redis is skipped for 10 s after an error so an outage
 doesn't slow requests down.
 
+To try it on one machine, `loadtest/compose.scale.yml` adds Redis, a second gateway and a Caddy load
+balancer to the Compose stack: `docker compose -f docker-compose.yml -f loadtest/compose.scale.yml up -d`.
+`python loadtest/bench.py --instances 2` benchmarks that setup.
+
 ## Testing
 
 ```bash
 pip install -r requirements-dev.txt  # or the hash-locked requirements-dev.lock (Linux/Python 3.11)
 python -m pytest                     # offline suite incl. OpenAI SDK contract tests
 TEST_DATABASE_URL=postgresql+psycopg://... python -m pytest   # + PostgreSQL migrations/integration (DISPOSABLE database only)
+REDIS_TEST_URL=redis://localhost:6379/0 python -m pytest   # shared-state tests on a real Redis (DISPOSABLE: flushed)
 python scripts/codebase_graph.py     # codebase graph is current
 python loadtest/bench.py             # whole-stack benchmark in a throwaway Compose project
 python scripts/demo.py               # end-to-end demo against real providers (needs keys)
@@ -609,7 +614,7 @@ npx playwright test                           # end-to-end test against a runnin
 - Without `REDIS_URL`, breakers, rate-limit windows, budget reservations and
   the cache are per process: one gateway instance. With it, see
   [several instances](#running-several-instances).
-- Measured capacity and overhead: [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md)
+- Measured capacity and overhead, one and two instances: [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md)
   (one machine, mock providers; not a capacity guarantee).
 - Budgets are hard only for priced models with an output cap (see
   [Budgets](#budgets-and-alerts)); no SSO (user identity = which key a person holds).

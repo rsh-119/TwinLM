@@ -16,14 +16,15 @@ gateway instances share them (app.gateway.shared)."""
 import logging
 import math
 import threading
+import time
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Dict, Iterable, List, NamedTuple, Optional, Sequence, Set, Tuple
 
 import httpx
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.auth import Principal
@@ -38,6 +39,8 @@ logger = logging.getLogger("twinlm.budgets")
 
 ALERT_THRESHOLDS = (80, 100)  # percent of the limit
 _RESERVATION_TTL_SECONDS = 900  # Redis: a crashed instance's reservations expire
+# Budget edits apply at once on the instance that made them, within this on others.
+_BUDGETS_TTL_SECONDS = 5.0
 
 
 def period_start(period: str, now: Optional[datetime] = None) -> datetime:
@@ -75,14 +78,22 @@ def limit_for(budget: Budget, now: Optional[datetime] = None) -> Limit:
                  period_start(budget.period, now), filters, budget.id)
 
 
-def applicable(db: Session, principal: Principal) -> List[Limit]:
+class BudgetRow(NamedTuple):
+    """A budgets row detached from any session (the tracker caches these)."""
+
+    id: str
+    scope: str
+    target: str
+    period: str
+    limit_usd: float
+
+
+def applicable(principal: Principal, budgets: Iterable[BudgetRow]) -> List[Limit]:
     limits = []
     if principal.daily_budget_usd is not None:
         limits.append(Limit(f"key:{principal.key_id}:daily", "API key daily", principal.daily_budget_usd,
                             period_start("daily"), {"api_key_id": principal.key_id}))
-    # ponytail: the budgets table is read per request - it is tiny and
-    # indexed by its unique constraint; cache it if it ever shows up in profiles
-    for budget in db.query(Budget).all():
+    for budget in budgets:
         if (budget.scope == "org" or (budget.scope == "team" and budget.target == principal.project)
                 or (budget.scope == "user" and principal.user_id and budget.target == principal.user_id)):
             limits.append(limit_for(budget))
@@ -212,16 +223,40 @@ class RedisReservations:
 
 
 class BudgetTracker:
-    def __init__(self, reservations=None) -> None:
+    def __init__(self, reservations=None, clock=time.monotonic) -> None:
         self.reservations = reservations or LocalReservations()
         self._alerted: Set[Tuple[str, datetime, int]] = set()
+        self._clock = clock
+        self._budgets: Optional[List[BudgetRow]] = None
+        self._loaded_at = 0.0
+
+    def budgets(self, db: Session) -> List[BudgetRow]:
+        """The budgets table, re-read at most every _BUDGETS_TTL_SECONDS, so a
+        request no budget applies to needs no database (stateless chat keeps
+        working through a database outage). While the database is down the
+        last copy is used."""
+        now = self._clock()
+        if self._budgets is None or now - self._loaded_at >= _BUDGETS_TTL_SECONDS:
+            try:
+                self._budgets = [BudgetRow(b.id, b.scope, b.target, b.period, b.limit_usd)
+                                 for b in db.query(Budget).all()]
+                self._loaded_at = now
+            except SQLAlchemyError:
+                if self._budgets is None:
+                    raise
+                logger.warning("database unavailable; using the last loaded budgets")
+        return self._budgets
+
+    def invalidate(self) -> None:
+        """Budgets changed (admin API): re-read them on the next request."""
+        self._budgets = None
 
     def admit(self, db: Session, principal: Principal, estimate: float, writer=None) -> Optional[Reservation]:
         """Reserve `estimate` against every budget that applies, or raise
         BudgetExceeded (nothing stays reserved). Reserving first and then
         checking means two concurrent requests can both be refused near the
         limit, never both admitted past it."""
-        limits = applicable(db, principal)
+        limits = applicable(principal, self.budgets(db))
         if not limits:
             return None
         totals = self.reservations.reserve([l.key for l in limits], estimate)

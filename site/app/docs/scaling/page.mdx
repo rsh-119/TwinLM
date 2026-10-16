@@ -14,6 +14,13 @@ behind a load balancer when you need more capacity, or so one can restart while 
 
 The startup log shows `shared_state=redis` when Redis is in use.
 
+To try it on one machine, the repository's `loadtest/compose.scale.yml` adds Redis, a second gateway and a Caddy
+load balancer to the Compose stack:
+
+```bash
+docker compose -f docker-compose.yml -f loadtest/compose.scale.yml up -d
+```
+
 ## What is shared
 
 | With `REDIS_URL` | Effect |
@@ -41,7 +48,8 @@ attempt instead of slowing every request. When Redis is back, sharing resumes on
 Redis holds no data that matters long term: rate-limit windows, cache entries and reservations all expire on
 their own. It needs no backup.
 
-<Note title="Tested, not yet load-tested">
-Two instances sharing PostgreSQL and Redis have been tested for shared rate limits, cache, budgets, revocation,
-configuration reloads and a Redis outage. Throughput with several instances hasn't been benchmarked yet.
+<Note title="Measured on one machine">
+Two instances on one 4-CPU host ran without errors and survived provider and database outages, but added no
+throughput at saturation: they share the same CPUs. Put instances on separate hosts to add capacity. Details:
+[Performance](/docs/performance/#one-vs-two-instances-17-october-2026).
 </Note>

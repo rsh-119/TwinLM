@@ -4,7 +4,47 @@ All numbers come from real runs and describe **this machine and setup**,
 not a capacity guarantee. Mock providers isolate the gateway; real
 providers' latency and quotas will dominate real traffic.
 
-## Current: whole stack, 14 October 2026
+## One vs. two instances, 17 October 2026
+
+Same host and benchmark as below, after budgets, the semantic cache and
+Redis support were added. `python loadtest/bench.py --instances 1` and
+`--instances 2`; the second runs two gateways behind Caddy with shared
+PostgreSQL and Redis (`loadtest/compose.scale.yml`). One run each, while
+another TwinLM stack was idling on the same Docker VM. Raw results:
+`docs/benchmarks/2026-10-17-one-instance.json`, `...-two-instances.json`.
+
+| Users (50 ms mock) | 1 instance: RPS, p50, p95 | 2 instances: RPS, p50, p95 |
+| --- | --- | --- |
+| 1 | 14.6, 66 ms, 87 ms | 14.3, 69 ms, 79 ms |
+| 10 | 63.3, 129 ms, 314 ms | 73.8, 122 ms, 244 ms |
+| 50 | 105.0, 432 ms, 717 ms | 101.6, 449 ms, 890 ms |
+| 100 | 94.2, 884 ms, 1,996 ms | 85.3, 1,089 ms, 2,082 ms |
+
+| | 1 instance | 2 instances |
+| --- | --- | --- |
+| Errors at every level | 0% | 0% |
+| Gateway-added latency p50 / p95 | 10.7 / 21.7 ms | 15.8 / 45.1 ms (load balancer + Redis) |
+| Provider outage | 0 failed, fallback served | 0 failed, fallback served |
+| 10 s database outage (stateless, validated key) | 0 failed of 1,975 | 0 failed of 1,948 |
+| Usage outbox after recovery | drained, no deadletters | both drained, no deadletters |
+| Memory at idle | gateway 91 MiB | 2 × 93 MiB, Redis 3 MiB, Caddy 12 MiB |
+
+What it shows: on **one 4-CPU host** a second instance adds no throughput
+at saturation (both share the CPUs, and each request makes extra hops);
+it helps only below saturation. Several instances are for **separate
+hosts** and for keeping service through a restart, not for squeezing one
+machine. Correctness held: shared limits, no lost usage records, outages
+survived.
+
+**Regression found and fixed by this run.** The first run after the
+budgets change failed 23 of 1,352 requests during the database outage and
+lost about 30% of throughput (71 RPS at 50 users). Admission read the
+`budgets` table on every request, so stateless chat needed the database
+again. The tracker now caches the table (5 s, refreshed on edits, last
+copy used during an outage); the numbers above are after the fix, and
+`test_stateless_chat_needs_no_database_once_the_key_is_validated` guards it.
+
+## Whole stack, 14 October 2026
 
 | | |
 | --- | --- |
@@ -94,5 +134,5 @@ moved usage writes off the event loop (`UsageWriter`). Those numbers are
 from an older working tree and a different stack; do not compare them with
 the table above.
 
-Not measured: real providers, multi-worker deployments, hosts other than
-this one.
+Not measured: real providers, multi-worker deployments, several instances on
+separate hosts, hosts other than this one.

@@ -1,0 +1,62 @@
+# Two gateway instances behind a load balancer, sharing PostgreSQL and
+# Redis. An overlay on docker-compose.yml, used by `bench.py --instances 2`:
+#
+#   docker compose -f docker-compose.yml -f loadtest/compose.scale.yml up -d
+#
+# The load balancer takes the gateway's published port; each gateway keeps
+# its own usage outbox volume.
+
+services:
+  gateway:
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    ports: !reset []
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  gateway2:
+    extends:
+      file: docker-compose.yml   # relative to the project directory
+      service: gateway
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    ports: !reset []
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ${GATEWAY_CONFIG_FILE:-./gateway.toml}:/app/gateway.toml:ro
+      - secrets:/run/secrets:ro
+      - gateway2-data:/app/data
+
+  redis:
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    command: ["redis-server", "--save", "", "--appendonly", "no"]   # nothing in it needs persisting
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  lb:
+    image: caddy:2.8-alpine@sha256:af32e97399febea808609119bb21544d0265c58a02836576e32a2d082c262c17
+    command:
+      - caddy
+      - reverse-proxy
+      - --from
+      - :8000
+      - --to
+      - gateway:8000
+      - --to
+      - gateway2:8000
+    ports:
+      - "${GATEWAY_BIND:-127.0.0.1}:${GATEWAY_PORT:-8000}:8000"
+    depends_on:
+      - gateway
+      - gateway2
+    restart: unless-stopped
+
+volumes:
+  gateway2-data:

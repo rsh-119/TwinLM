@@ -101,7 +101,7 @@ const FAQ: [string, string][] = [
   ],
   [
     "Is it production-ready?",
-    "TwinLM is young. It has an automated test suite, versioned database migrations, backup and restore scripts, and has been load-tested on one instance with simulated providers. Several instances can share state through Redis; that is tested but not yet load-tested. If it will carry critical traffic, talk to us first.",
+    "TwinLM is young. It has an automated test suite, versioned database migrations, backup and restore scripts, and has been load-tested on one instance with simulated providers. Several instances can share state through Redis; that is benchmarked on one host, not yet across machines. If it will carry critical traffic, talk to us first.",
   ],
 ];
 

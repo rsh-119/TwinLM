@@ -125,3 +125,19 @@ def test_auth_cache_rides_out_a_database_outage(client, auth, monkeypatch):
     assert unknown.status_code == 503
     assert unknown.headers["Retry-After"] == "5"
     assert unknown.json()["error"]["message"] == "database unavailable"
+
+
+def test_stateless_chat_needs_no_database_once_the_key_is_validated(client, auth, monkeypatch):
+    """The whole database down, not just the key lookup: a validated key
+    without budgets keeps working (usage waits in the outbox)."""
+    from sqlalchemy.exc import OperationalError
+    from sqlalchemy.orm import Session
+
+    _, headers = _key(client)
+    assert client.post("/v1/chat/completions", json={"messages": TURN}, headers=headers).status_code == 200
+
+    def database_down(*_args, **_kwargs):
+        raise OperationalError("SELECT", {}, Exception("connection refused"))
+
+    monkeypatch.setattr(Session, "execute", database_down)
+    assert client.post("/v1/chat/completions", json={"messages": TURN}, headers=headers).status_code == 200
