@@ -31,6 +31,8 @@ case-insensitive. Behaviour (models, routing, prices) lives in [`gateway.toml`](
 | `STATEFUL_ENABLED` | `true` | Mount conversations and memories. `false` = pure stateless proxy |
 | `STATEFUL_REQUIRES_USER_KEYS` | `false` | Only user-bound keys may use conversations and memories |
 | `WEB_UI_ENABLED` | `false` | The minimal browser UI. It has no login: keep it private |
+| `BUDGET_ALERT_WEBHOOK_URL` | empty | [Budget alerts](/docs/budgets/#alerts) are POSTed here as JSON with a Slack-style `text` field |
+| `REDIS_URL` | empty | Shared state for [several instances](/docs/scaling/): rate limits, cache, budget reservations, revocation, console config. Empty = one instance |
 | `LOG_FORMAT` | `json` | `json` or `text` |
 | `LOG_LEVEL` | `INFO` | Python log level |
 

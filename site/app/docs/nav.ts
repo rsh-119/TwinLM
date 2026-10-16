@@ -23,7 +23,8 @@ export const DOCS_NAV: { section: string; pages: [title: string, href: string][]
       ["Caching", "/docs/caching/"],
       ["Output caps", "/docs/output-caps/"],
       ["Usage and savings", "/docs/usage-and-savings/"],
-      ["Keys, limits and budgets", "/docs/keys/"],
+      ["Keys and rate limits", "/docs/keys/"],
+      ["Budgets and alerts", "/docs/budgets/"],
       ["Teams and members", "/docs/teams/"],
     ],
   },
@@ -53,6 +54,7 @@ export const DOCS_NAV: { section: string; pages: [title: string, href: string][]
     pages: [
       ["Operations runbook", "/docs/operations/"],
       ["Monitoring", "/docs/monitoring/"],
+      ["Running several instances", "/docs/scaling/"],
       ["Performance and limits", "/docs/performance/"],
       ["Troubleshooting", "/docs/troubleshooting/"],
     ],

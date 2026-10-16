@@ -1,6 +1,6 @@
-export const metadata = { title: "Keys, limits and budgets" };
+export const metadata = { title: "Keys and rate limits" };
 
-# Keys, limits and budgets
+# Keys and rate limits
 
 Give every application, team or person its own gateway key. Keys are how TwinLM attributes spend and applies
 limits. They look like `gw_live_…`, are 256-bit random, and only their SHA-256 hash is stored; the raw key is
@@ -38,7 +38,7 @@ curl -X POST http://localhost:8000/admin/keys \
 | `allowed_models` | no | Aliases or models this key may use; omitted = all. Others get 403 |
 | `rpm_limit` | no | Requests per minute |
 | `tpm_limit` | no | Tokens per minute |
-| `daily_budget_usd` | no | Advisory daily spend limit (UTC day) |
+| `daily_budget_usd` | no | Daily spend limit for this key (UTC day) |
 | `user_id` | no | Makes this a **user-bound** key ([below](#service-keys-and-user-bound-keys)) |
 
 The response contains the key's settings plus `key`, the raw value. Store it in your app's secret store.
@@ -67,13 +67,9 @@ default_tpm = 100000
 
 ## Daily budget
 
-`daily_budget_usd` rejects a key's requests with **429** once today's (UTC) spend for that key reaches the budget.
-Spend counts settled requests plus usage still queued locally.
-
-<Note title="The budget is advisory">
-Requests already in flight when the budget is reached still complete, and requests with an unknown price aren't
-counted, so actual spend can exceed the budget. Set spend limits at your providers as the hard stop.
-</Note>
+`daily_budget_usd` is a spending limit for one key per UTC day: a request that would take the key's spend past it
+gets **429**. Budgets for a whole team, a person or the company, monthly limits and alerts are on
+[Budgets and alerts](/docs/budgets/), which also explains exactly when a budget is a hard stop.
 
 ## Listing, rotating and revoking
 
@@ -103,7 +99,7 @@ The distinction only matters for the optional [conversations and memories](/docs
 | --- | --- |
 | 401 | Missing, invalid or revoked key |
 | 403 | Model not in the key's `allowed_models` |
-| 429 | Rate limit or daily budget exceeded (`Retry-After` header) |
+| 429 | Rate limit (`Retry-After` header) or a [budget](/docs/budgets/) exceeded |
 
 ## Running without auth
 
@@ -111,4 +107,4 @@ The distinction only matters for the optional [conversations and memories](/docs
 Use it only for a private, single-user setup on your own machine.
 
 Validated keys are cached in memory for `AUTH_CACHE_SECONDS` (30 by default) to save a database round trip;
-revoke and rotate clear that cache immediately.
+revoke and rotate clear that cache immediately, on every instance when [`REDIS_URL`](/docs/scaling/) is set.

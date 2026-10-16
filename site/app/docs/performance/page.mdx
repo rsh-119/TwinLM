@@ -39,11 +39,13 @@ throwaway Compose project).
 
 ## Known limits
 
-- **One gateway instance.** Rate-limit windows, circuit breakers and the cache are in process memory. Running
-  several instances would multiply the limits and split the cache. Shared state is needed first.
-- **The daily budget is advisory.** Concurrent requests and unknown prices can exceed it.
+- **Measured on one instance.** Several instances can share limits, cache and budgets through Redis
+  ([Running several instances](/docs/scaling/)), but that setup hasn't been benchmarked. Circuit breakers stay
+  per instance.
+- **Budgets need prices and an output cap** to be a hard stop; unpriced models can exceed them
+  ([Budgets](/docs/budgets/)).
 - **No SSO.** A user's identity is which key they hold.
-- **Not implemented:** `n > 1`, semantic caching, batch or queued execution, OpenTelemetry tracing, bulk user
+- **Not implemented:** `n > 1`, batch or queued execution, OpenTelemetry tracing, bulk user
   erasure.
 - **Tools and images are stateless-only.** Falling back between providers mid tool-conversation works, but tool-call
   ids don't carry over.

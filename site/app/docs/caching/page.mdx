@@ -2,9 +2,10 @@ export const metadata = { title: "Caching" };
 
 # Caching
 
-TwinLM answers **identical deterministic requests** from an in-memory cache. A cache hit costs nothing, returns in
+TwinLM answers **identical deterministic requests** from a cache. A cache hit costs nothing, returns in
 milliseconds, and never reaches the provider. FAQ bots, classifiers, extraction jobs and client retries repeat
-themselves far more than people expect.
+themselves far more than people expect. For questions asked in many different words, an opt-in
+[semantic cache](#semantic-cache) goes one step further.
 
 ## What gets cached
 
@@ -50,6 +51,39 @@ print(raw.headers.get("x-cache"))
 Usage reports count `cache_hits` and `cache_hit_rate`; hits are logged at zero cost, and the
 [savings report](/docs/usage-and-savings/#savings-report) values them as `cache_avoided_usd`.
 
+## Semantic cache
+
+People ask the same thing in different words: "When are you open?", "What are your opening hours?". The exact
+cache treats those as different requests. The semantic cache reuses the answer when the **meaning** is close
+enough.
+
+It is **off by default and opt-in per alias**. List the aliases that may use it:
+
+```toml
+[cache.semantic]
+models = ["faq"]              # aliases that may use it
+embedding_model = "embed"     # an alias or deployment with embeddings
+min_similarity = 0.95         # 0-1: how close the meaning must be
+max_entries = 1000
+```
+
+For a request to a listed alias that misses the exact cache, TwinLM embeds the **last user message** and looks for
+a cached answer whose question scored at least `min_similarity` (cosine similarity). Everything before that
+message (system prompt, earlier turns, parameters and the caller's project) must still match exactly, so an answer
+for one product or customer is never served to another. The same rules as above decide what can be cached, and
+`[cache] enabled` must be on.
+
+A semantic hit returns `X-Cache: HIT` plus `X-Cache-Similarity`, for example `0.9731`.
+
+<Note title="Similar is not the same">
+"What is the capital of France?" and "What is the capital of Germany?" score around 0.9. Use the semantic cache
+for aliases where a close match is a correct answer (FAQ, support, product questions), not for code, maths or
+anything where a small change in wording changes the answer. Raise `min_similarity` if you see wrong hits.
+</Note>
+
+Each miss costs one embeddings call (usually a tiny fraction of a chat request). It is logged as its own request,
+so it shows up in usage reports.
+
 ## Clearing it
 
 ```bash
@@ -57,13 +91,15 @@ curl -X DELETE http://localhost:8000/admin/cache -H "Authorization: Bearer $ADMI
 # {"cleared": 42}
 ```
 
-The cache also empties when the gateway restarts.
+This clears the semantic cache too. Both empty when the gateway restarts, unless the exact cache is
+[shared through Redis](/docs/scaling/).
 
 ## Limits
 
-- **Exact match only.** "What's your refund policy?" and "what is your refund policy" are different entries.
-  There is no semantic cache.
-- **In process.** Each gateway instance has its own cache.
+- **Exact match by default.** "What's your refund policy?" and "what is your refund policy" are different entries
+  unless the alias uses the [semantic cache](#semantic-cache).
+- **Per instance.** Each gateway instance has its own cache, unless `REDIS_URL` is set: then the exact cache is
+  [shared](/docs/scaling/). The semantic cache is always per instance.
 - **Provider-side prompt caching** (discounts some providers give for repeated prompt prefixes) is separate.
   Automatic prompt caching, such as OpenAI's, still applies to requests that pass through. TwinLM doesn't forward
   provider-specific cache-control parameters.
