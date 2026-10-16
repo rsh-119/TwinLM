@@ -268,17 +268,20 @@ def set_budget(body: BudgetIn, db: Session = Depends(get_db),
         db.add(budget)
     budget.limit_usd = body.limit_usd
     db.commit()
+    services.budgets.invalidate()
     return _budget_view(db, budget, services)
 
 
 @router.delete("/budgets/{budget_id}")
-def delete_budget(budget_id: str, db: Session = Depends(get_db)) -> dict:
+def delete_budget(budget_id: str, db: Session = Depends(get_db),
+                  services: GatewayServices = Depends(get_services)) -> dict:
     budget = db.get(Budget, budget_id)
     if budget is None:
         raise HTTPException(status_code=404, detail="budget not found")
     db.query(BudgetAlert).filter(BudgetAlert.budget_id == budget_id).delete()
     db.delete(budget)
     db.commit()
+    services.budgets.invalidate()
     return {"deleted": budget_id}
 
 

@@ -104,3 +104,29 @@ def test_worst_case_cost():
     assert budgets.worst_case_cost(targets, PRICED, input_chars=7, max_output_tokens=2) == 3 + 4
     assert budgets.worst_case_cost([("groq", "x")], PRICED, 100, 100) == 0.0  # unknown price: nothing reserved
     assert budgets.period_end("monthly", budgets.period_start("monthly")).day == 1
+
+
+def test_budgets_are_cached_and_survive_a_database_outage(db_session, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    now = [0.0]
+    tracker = BudgetTracker(clock=lambda: now[0])
+    db_session.add(Budget(scope="org", target="*", period="daily", limit_usd=10))
+    db_session.commit()
+    assert [b.limit_usd for b in tracker.budgets(db_session)] == [10]
+
+    db_session.query(Budget).update({Budget.limit_usd: 20})
+    db_session.commit()
+    assert [b.limit_usd for b in tracker.budgets(db_session)] == [10]  # cached
+    now[0] = 6
+    assert [b.limit_usd for b in tracker.budgets(db_session)] == [20]  # refreshed after the TTL
+
+    def database_down(*_args, **_kwargs):
+        raise OperationalError("SELECT", {}, Exception("connection refused"))
+
+    monkeypatch.setattr(db_session, "query", database_down)
+    now[0] = 12
+    assert [b.limit_usd for b in tracker.budgets(db_session)] == [20]  # last copy while it's down
+    tracker.invalidate()
+    with pytest.raises(OperationalError):
+        tracker.budgets(db_session)  # nothing to fall back on
