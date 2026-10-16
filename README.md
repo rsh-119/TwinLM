@@ -614,7 +614,7 @@ npx playwright test                           # end-to-end test against a runnin
 - Without `REDIS_URL`, breakers, rate-limit windows, budget reservations and
   the cache are per process: one gateway instance. With it, see
   [several instances](#running-several-instances).
-- Measured capacity and overhead: [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md)
+- Measured capacity and overhead, one and two instances: [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md)
   (one machine, mock providers; not a capacity guarantee).
 - Budgets are hard only for priced models with an output cap (see
   [Budgets](#budgets-and-alerts)); no SSO (user identity = which key a person holds).

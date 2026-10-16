@@ -48,7 +48,8 @@ attempt instead of slowing every request. When Redis is back, sharing resumes on
 Redis holds no data that matters long term: rate-limit windows, cache entries and reservations all expire on
 their own. It needs no backup.
 
-<Note title="Tested, not yet load-tested">
-Two instances sharing PostgreSQL and Redis have been tested for shared rate limits, cache, budgets, revocation,
-configuration reloads and a Redis outage. Throughput with several instances hasn't been benchmarked yet.
+<Note title="Measured on one machine">
+Two instances on one 4-CPU host ran without errors and survived provider and database outages, but added no
+throughput at saturation: they share the same CPUs. Put instances on separate hosts to add capacity. Details:
+[Performance](/docs/performance/#one-vs-two-instances-17-october-2026).
 </Note>
