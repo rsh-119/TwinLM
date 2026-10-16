@@ -1,10 +1,10 @@
 {
  "schema": 1,
  "source": {
-  "revision": "aadda0e2361cf9d158fb8c29dea891c0da39b26b",
-  "working_tree_dirty": true,
-  "fingerprint": "292676dff7d20619",
-  "updated_at": "2026-10-16T18:46:17Z"
+  "revision": "e95023d7d01f0a3823b33ac2baff49bffaf726d4",
+  "working_tree_dirty": false,
+  "fingerprint": "1db0548ac9dd5d4c",
+  "updated_at": "2026-10-16T19:51:42Z"
  },
  "annotations": [
   {
@@ -2601,6 +2601,12 @@
   {
    "from": "app.api.admin_config",
    "to": "app.gateway.secret_box",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin_config",
+   "to": "app.providers.gemini",
    "type": "imports",
    "auto": true
   },
