@@ -20,7 +20,7 @@ from app.database.database import get_db
 from app.database.models import AliasOverride, PriceOverride, ProviderConfigRow
 from app.gateway import runtime, secret_box
 from app.gateway.config import Capability, ProviderConfig
-from app.gateway.presets import PRESETS
+from app.gateway.presets import PRESETS, chat_models, recommended_model
 from app.providers.gemini import GEMINI_API_BASE
 from app.router.model_router import build_provider, get_model_router
 
@@ -264,7 +264,11 @@ async def test_provider(body: TestIn, db: Session = Depends(get_db)) -> dict:
                "error": f"{type(exc).__name__}: {exc}"[:500]}
     finally:
         await provider.aclose()
-    out["models"] = await _live_models(cfg, api_key or "")
+    out["models"] = chat_models(await _live_models(cfg, api_key or ""))  # for picking a chat model
+    # pre-select the lightest model this key can use (the preset's list is lightest first)
+    row = db.get(ProviderConfigRow, body.name) if body.name else None
+    preset = PRESETS.get((row.preset if row else body.preset) or "")
+    out["recommended"] = recommended_model(preset["models"] if preset else [cfg.default_model], out["models"])
     return out
 
 

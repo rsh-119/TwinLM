@@ -24,16 +24,19 @@ and go to **Providers → Add provider**.
 1. Pick a provider: Anthropic, OpenAI, Azure OpenAI, Mistral, DeepSeek, Groq, Gemini, xAI, Together, OpenRouter,
    Fireworks, Perplexity, Cerebras, NVIDIA NIM, Hugging Face, Cohere, Ollama, LM Studio, or any custom
    OpenAI-compatible endpoint. For Azure, replace `YOUR-RESOURCE` in the endpoint and use your deployment name as
-   the model; TwinLM sends Azure's `api-key` header. The endpoint and model list are filled in.
-2. Choose the default model (or type any model the provider offers) and paste the API key.
+   the model; TwinLM sends Azure's `api-key` header. The endpoint and model list are filled in. Providers with a
+   free plan (Gemini, Groq, Mistral, OpenRouter, Cerebras and others) are marked **Free tier**.
+2. Paste the API key. The **default model** is pre-selected as the provider's lightest, cheapest model; pick another
+   from the list, or choose **Other model…** to type any name the provider accepts.
 3. **Test connection** sends one tiny request (1 output token) with that key and shows the provider's answer or
-   its exact error.
+   its exact error. It also loads **every chat model your key can use** into the list. If the selected model isn't
+   available on your key (models get retired), the lightest one that is gets selected instead.
 4. **Save provider.** It is live immediately.
-5. On the **Models** page, add it to a model, for example put `anthropic/claude-haiku-4-5` first in `smart`, and
+5. On the **Models** page, add it to a model, for example put `anthropic/claude-haiku-5-5` first in `smart`, and
    enter its prices so cost and savings include it.
 
-From a provider's **⋯** menu you can disable or re-enable a provider, replace its key, test it again, or delete it
-(after removing it from every model that uses it).
+From a provider's **⋯** menu you can **change its model** (from the models on its key), disable or re-enable it,
+replace its key, test it again, or delete it (after removing it from every model that uses it).
 
 <Note title="How keys are stored">
 Keys entered in the console are encrypted in the database with `PROVIDER_KEYS_SECRET` (Compose generates one)
