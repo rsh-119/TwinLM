@@ -56,6 +56,7 @@ class OpenAICompatibleProvider(PooledHTTPProvider):
         default_model: str,
         timeout_seconds: float = 30.0,
         require_api_key: bool = True,
+        auth_header: str = "authorization",
     ) -> None:
         super().__init__(timeout_seconds)
         self.name = name
@@ -63,11 +64,16 @@ class OpenAICompatibleProvider(PooledHTTPProvider):
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key or ""
         self._require_api_key = require_api_key
+        self._auth_header = auth_header
 
     def _headers(self) -> Dict[str, str]:
         if self._require_api_key and not self._api_key:
             raise ProviderUnavailableError(f"{self.name} api key is not configured")
-        return {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+        if not self._api_key:
+            return {}
+        if self._auth_header == "api-key":
+            return {"api-key": self._api_key}
+        return {"Authorization": f"Bearer {self._api_key}"}
 
     def _check_status(self, status_code: int, body: bytes) -> None:
         if _is_token_rate_limited(status_code, body):

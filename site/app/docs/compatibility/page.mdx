@@ -1,0 +1,73 @@
+export const metadata = { title: "OpenAI compatibility" };
+
+# OpenAI compatibility
+
+TwinLM implements a **documented subset** of the OpenAI API and checks it against the official OpenAI Python SDK
+in its test suite. Anything outside the subset is rejected with a clear error rather than silently ignored, so
+you find out on your first test call.
+
+## Endpoints
+
+| Endpoint | Status |
+| --- | --- |
+| `POST /v1/chat/completions` | JSON and SSE streaming |
+| `POST /v1/embeddings` | float and base64 encoding |
+| `GET /v1/models` | the models this key may use, with a `capabilities` extension |
+| Completions (legacy), Assistants, Responses, Files, Batch, Images, Audio, Moderations, Fine-tuning | Not implemented (404) |
+
+## Chat completion parameters
+
+| Parameter | Status |
+| --- | --- |
+| `model`, `messages` | Supported. `model` is an alias, deployment id, provider or `provider/model` ([Routing](/docs/routing/)) |
+| `stream`, `stream_options.include_usage` | Supported |
+| `temperature`, `top_p`, `stop` (up to 4) | Passed to the provider |
+| `max_tokens`, `max_completion_tokens` | Passed to the provider, clamped by the [output cap](/docs/output-caps/) |
+| `presence_penalty`, `frequency_penalty`, `seed` | Passed to the provider |
+| `tools`, `tool_choice`, `parallel_tool_calls`, `tool` messages | Stateless requests only; routed to deployments with `tools`. Gemini ignores `parallel_tool_calls=false` |
+| Image content parts (`image_url`) | Stateless requests only; routed to deployments with `vision`; Gemini needs `data:` URLs |
+| `response_format` (`json_object`, `json_schema`) | Validated by the gateway with bounded repair; not with `stream=true` |
+| `user` | Accepted, not forwarded |
+| `conversation_id` | TwinLM extension ([Conversations](/docs/stateful/)) |
+| `n > 1`, `logprobs`, `top_logprobs`, `logit_bias`, `audio`, `modalities`, `prediction`, `store`, `metadata`, `functions`, any other field | **400** `unsupported_parameter`, with `param` naming the field. Explicit `null` values are tolerated |
+
+## Embeddings parameters
+
+`model`, `input` (string or list of strings) and `encoding_format` (`float` or `base64`) are supported.
+`dimensions` returns 400.
+
+## Response differences
+
+Responses contain every OpenAI field (`id`, `object`, `created`, `model`, `choices`, `usage`) and add:
+
+| Field / header | Meaning |
+| --- | --- |
+| `provider` | The provider that answered (after any fallback) |
+| `conversation_id`, `message` | Present for stateful requests |
+| `X-Request-ID` header | Correlates the request with logs and the usage record |
+| `X-Cache: HIT` or `MISS` | Whether the [cache](/docs/caching/) answered |
+
+`finish_reason` is the provider's real one: `stop`, `length`, `tool_calls` or `content_filter`.
+
+**Streaming chunks** are OpenAI `chat.completion.chunk` events that also carry `provider`, `delta` and `done`.
+Stateless streams end with `data: [DONE]`.
+
+## Errors
+
+Errors use OpenAI's shape so SDKs raise the right exception with the real message:
+
+```json
+{
+  "error": {"message": "unsupported parameter: logprobs", "type": "invalid_request_error", "param": "logprobs", "code": "unsupported_parameter"},
+  "detail": "unsupported parameter: logprobs"
+}
+```
+
+The full list of status codes is in [Troubleshooting](/docs/troubleshooting/#error-codes).
+
+## Capabilities
+
+Every deployment has a set of capabilities: `chat`, `tools`, `vision`, `embeddings`. A request that needs tools,
+images or embeddings is only sent to deployments that have that capability. If none do, it gets a 400 naming the
+missing capability. It is never silently sent to a model that can't handle it. Set capabilities per provider or
+per deployment in `gateway.toml` ([Providers](/docs/providers/)).

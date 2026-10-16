@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import secrets
 import threading
 import time
@@ -23,6 +24,7 @@ from app.config import get_settings
 from app.database import repository
 from app.database.database import get_db, release_connection
 from app.database.models import ApiKey
+from app.gateway.shared import get_redis
 
 logger = logging.getLogger("twinlm.auth")
 
@@ -77,17 +79,35 @@ def to_principal(key: ApiKey) -> Principal:
 
 
 # key hash -> (fresh until, principal). Only valid keys are cached.
-# ponytail: per-process cache; with several instances, revocation would
-# need a shared invalidation signal (or a TTL-only guarantee).
+# Per process; with REDIS_URL a revocation is broadcast to every instance
+# (a marker that outlives the cache TTL, checked on each cached hit).
 _cache: Dict[str, Tuple[float, Principal]] = {}
 _cache_lock = threading.Lock()
 _CACHE_MAX = 10_000
+REVOKED_PREFIX = "twinlm:revoked:"
 
 
 def forget_key(key_hash: str) -> None:
-    """Drop a key from the auth cache (revocation, rotation)."""
+    """Drop a key from the auth cache (revocation, rotation) - on every
+    instance when REDIS_URL is set."""
     with _cache_lock:
         _cache.pop(key_hash, None)
+    redis = get_redis()
+    if redis is not None:
+        try:
+            redis.set(f"{REVOKED_PREFIX}{key_hash}", 1, ex=math.ceil(get_settings().auth_cache_seconds) + 1)
+        except Exception:  # noqa: BLE001 - other instances notice within AUTH_CACHE_SECONDS
+            logger.warning("redis unavailable: revocation not broadcast", exc_info=True)
+
+
+def _revoked_elsewhere(key_hash: str) -> bool:
+    redis = get_redis()
+    if redis is None:
+        return False
+    try:
+        return bool(redis.exists(f"{REVOKED_PREFIX}{key_hash}"))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _lookup(db: Session, key_hash: str) -> Tuple[Optional[Principal], bool]:
@@ -97,7 +117,7 @@ def _lookup(db: Session, key_hash: str) -> Tuple[Optional[Principal], bool]:
     now = time.monotonic()
     with _cache_lock:
         cached = _cache.get(key_hash)
-    if cached is not None and cached[0] > now:
+    if cached is not None and cached[0] > now and not _revoked_elsewhere(key_hash):
         return cached[1], False
     try:
         key = repository.get_api_key_by_hash(db, key_hash)
@@ -134,6 +154,9 @@ def authenticate(request: Request, db: Session = Depends(get_db)) -> Optional[Pr
         return None
     token = _bearer_token(request)
     if not token:
+        console = _console_principal(request, db)
+        if console is not None:
+            return console
         raise _unauthorized("missing API key")
     try:
         principal, revoked = _lookup(db, hash_key(token))
@@ -148,10 +171,47 @@ def authenticate(request: Request, db: Session = Depends(get_db)) -> Optional[Pr
     return principal
 
 
-def require_admin(request: Request) -> None:
-    """FastAPI dependency for /admin. ADMIN_TOKEN unset disables the admin API."""
+def _console_principal(request: Request, db: Session) -> Optional[Principal]:
+    """The console playground: a signed-in user calls /v1 with their session
+    cookie and `X-TwinLM-Team`. Usage is billed to that team and recorded
+    under `console:<user id>` so it counts as the user's own usage."""
+    from app.console_auth import COOKIE_NAME, check_csrf, session_user
+    from app.database.models import Team
+
+    team_name = request.headers.get("x-twinlm-team", "")
+    token = request.cookies.get(COOKIE_NAME, "")
+    if not team_name or not token:
+        return None
+    current = session_user(db, token)
+    if current is None or current.user.must_change_password:
+        raise _unauthorized("console session expired - sign in again")
+    check_csrf(request, from_cookie=True)
+    team = db.query(Team).filter(Team.name == team_name).first()
+    if team is None or current.team_role(team.id) is None:
+        raise HTTPException(status_code=403, detail=f"you are not in team {team_name!r}")
+    return Principal(key_id=f"console:{current.user.id}", name=f"console:{current.user.email}", project=team.name,
+                     allowed_models=None, rpm_limit=None, tpm_limit=None, daily_budget_usd=None,
+                     user_id=current.user.id)
+
+
+def require_admin(request: Request, db: Session = Depends(get_db)) -> None:
+    """FastAPI dependency for /admin: the ADMIN_TOKEN, or the console session
+    of a signed-in org admin. With neither ADMIN_TOKEN nor console users the
+    admin API is disabled."""
+    from app.console_auth import SESSION_PREFIX, check_csrf, session_token, session_user
+
+    token, from_cookie = session_token(request)
     expected = get_settings().admin_token
+    if not from_cookie and expected and hmac.compare_digest(token.encode(), expected.encode()):
+        return
+    if token.startswith(SESSION_PREFIX):
+        check_csrf(request, from_cookie)
+        current = session_user(db, token)
+        if current is None:
+            raise _unauthorized("console session expired - sign in again")
+        if not current.is_admin or current.user.must_change_password:
+            raise HTTPException(status_code=403, detail="only admins can do this")
+        return
     if not expected:
         raise HTTPException(status_code=404, detail="admin API is disabled (set ADMIN_TOKEN)")
-    if not hmac.compare_digest(_bearer_token(request).encode(), expected.encode()):
-        raise _unauthorized("invalid admin token")
+    raise _unauthorized("invalid admin token")

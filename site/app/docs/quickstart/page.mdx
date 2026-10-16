@@ -1,0 +1,113 @@
+export const metadata = { title: "Quickstart" };
+
+# Quickstart
+
+Run TwinLM on your machine, create a key, send a request, and watch the cache and the cost report work.
+You need [Docker](https://docs.docker.com/get-docker/). Five minutes.
+
+## 1. Get provider keys
+
+The built-in configuration uses **Gemini** and **Groq**, both of which have free tiers:
+
+- Gemini: [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+- Groq: [console.groq.com/keys](https://console.groq.com/keys)
+
+Using OpenAI, DeepSeek or a local Ollama instead? Start here anyway, then see [Providers](/docs/providers/).
+
+<Note title="No keys yet?">
+Run with mock providers that answer instantly and cost nothing: save
+[`loadtest/gateway.mock.toml`](https://github.com/rsh-119/TwinLM/blob/main/loadtest/gateway.mock.toml) as
+`gateway.toml` next to the compose file and mount it (step 2).
+</Note>
+
+## 2. Start the gateway
+
+In an empty folder:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/rsh-119/TwinLM/main/deploy/quickstart.yml
+echo "GEMINI_API_KEY=your-gemini-key" >> .env
+echo "GROQ_API_KEY=your-groq-key" >> .env
+docker compose -f quickstart.yml up -d
+```
+
+This starts PostgreSQL and the gateway on `http://localhost:8000`. Check it is up:
+
+```bash
+curl http://localhost:8000/ready
+# {"status":"ready"}
+```
+
+An admin token was generated on first start. Print it and keep it in a variable:
+
+```bash
+export ADMIN_TOKEN=$(docker compose -f quickstart.yml exec gateway cat /run/secrets/admin_token)
+```
+
+On Windows PowerShell: `$env:ADMIN_TOKEN = docker compose -f quickstart.yml exec gateway cat /run/secrets/admin_token`.
+
+## 3. Create an API key
+
+Each app (or person) gets its own key. The raw key is shown **once**; only its hash is stored.
+
+```bash
+curl -X POST http://localhost:8000/admin/keys \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-laptop", "project": "personal"}'
+```
+
+Copy the `key` field from the response: it starts with `gw_live_`.
+
+## 4. Send your first request
+
+```bash
+pip install openai
+```
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="gw_live_...")
+
+for _ in range(2):  # ask the same thing twice
+    raw = client.chat.completions.with_raw_response.create(
+        model="auto",
+        temperature=0,
+        messages=[{"role": "user", "content": "Explain an LLM gateway in one sentence."}],
+    )
+    reply = raw.parse()
+    print(raw.headers.get("x-cache"), reply.provider, reply.choices[0].message.content)
+```
+
+The first call prints `MISS`: a provider answered. The second prints `HIT`: the same answer came from the
+cache and cost nothing. `reply.provider` tells you which provider served it.
+
+## 5. See usage, cost and savings
+
+```bash
+curl "http://localhost:8000/admin/usage?hours=24&group_by=model" -H "Authorization: Bearer $ADMIN_TOKEN"
+curl "http://localhost:8000/admin/savings?hours=24" -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+The usage report shows requests, tokens, cache hits, latency and cost per model. The savings report compares
+what you paid with what the same tokens would have cost on the baseline model (`openai/gpt-4o` in the shipped
+config). See [Usage and savings](/docs/usage-and-savings/).
+
+## Try the cost features
+
+- **Fallback.** Set a wrong `GROQ_API_KEY`, run `docker compose -f quickstart.yml up -d`, and ask with
+  `model="fast"`. Groq fails, Gemini answers, and the usage report counts a fallback.
+- **Output cap.** Ask for a long essay with `max_tokens=20`: the reply stops with `finish_reason: "length"`.
+  Without `max_tokens`, the default cap of 4,096 applies.
+- **Per-team spend.** Create a second key with `"project": "team-b"`, use both, then call
+  `/admin/usage?group_by=project`.
+
+## Stop or reset
+
+```bash
+docker compose -f quickstart.yml down      # stop, keep data
+docker compose -f quickstart.yml down -v   # stop and delete data and generated secrets
+```
+
+Next: [Deployment](/docs/deploy/) for real servers, or [Integrate your apps](/docs/integrate/).

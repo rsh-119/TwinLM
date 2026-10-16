@@ -37,7 +37,23 @@ jobs:
       - name: Codebase graph is current
         run: python scripts/codebase_graph.py
       - name: Dependency vulnerabilities
-        run: pip install pip-audit && pip-audit --strict -r requirements.lock -r ui/requirements.lock
+        run: pip install pip-audit && pip-audit --strict -r requirements.lock
+
+  console:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build   # type-checks and exports the web console
 
   deploy-config:
     runs-on: ubuntu-latest
@@ -46,7 +62,7 @@ jobs:
       - name: Compose (every profile)
         run: |
           docker compose --env-file .env.example config --quiet
-          docker compose --env-file .env.example --profile console --profile monitoring --profile ingress config --quiet
+          docker compose --env-file .env.example --profile monitoring --profile ingress config --quiet
       - name: Alert rules
         run: docker run --rm --entrypoint promtool -v "$PWD/monitoring:/m" prom/prometheus:v2.55.1 check rules /m/alerts.yml
       - name: Ingress config
@@ -64,7 +80,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t twinlm:test .
-      - run: docker build -t twinlm-console:test ./ui
 
   image:
     needs: [test, deploy-config]

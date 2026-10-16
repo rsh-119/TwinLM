@@ -1,0 +1,77 @@
+export const metadata = { title: "Troubleshooting" };
+
+# Troubleshooting
+
+## Error codes
+
+Errors use OpenAI's shape, `{"error": {"message", "type", "param", "code"}}`, with the same message in `detail`.
+Every response, including errors, has an `X-Request-ID` header: search the logs for it.
+
+| Status | Meaning | What to do |
+| --- | --- | --- |
+| 400 `unsupported_parameter` | A field TwinLM doesn't support (`param` names it) | Remove it; see [compatibility](/docs/compatibility/) |
+| 400 unknown model or missing capability | `model` isn't an alias, deployment or provider, or nothing behind it supports the tools, images or embeddings the request needs | Check `GET /v1/models`; set `capabilities` |
+| 400 provider rejected the request | The provider returned a client error (bad parameter for that model, context too long) | Read the message; it is the provider's |
+| 400 guardrail | Input blocked by a guardrail, or longer than `max_input_chars` | Remove the secret or PII, or change the action |
+| 401 | Missing, invalid or revoked gateway key | Check `Authorization: Bearer gw_live_…` |
+| 403 | Model not in the key's `allowed_models`, or another user's data with a user-bound key | Use an allowed model or the right key |
+| 404 | Conversation not found in this project, unknown key id, or `/admin/savings` without a baseline | Check ids; set `[savings] baseline` |
+| 409 | Two concurrent turns on one conversation | Retry the second turn |
+| 413 | Request body over 1 MiB | Send less, or images as URLs where the provider allows |
+| 429 | Rate limit or daily budget exceeded | Wait for `Retry-After`; raise the key's limits |
+| 502 | Unexpected upstream error, an output guardrail blocked the reply, or structured output stayed invalid | Check the logs for the request ID |
+| 503 `server busy` | More than `MAX_CONCURRENT_REQUESTS` in flight | Raise the limit or slow the client |
+| 503 provider unavailable | Every target failed or has an open circuit | Check `GET /admin/providers` and provider status |
+| 503 `provider credentials are unavailable` | A provider key is missing or rejected | Fix the key in `.env` and restart |
+| 503 `request deadline exceeded` | `request_timeout_seconds` passed across retries and fallbacks | Raise the deadline or use a faster model |
+| 503 `database unavailable` | PostgreSQL unreachable (`Retry-After: 5`) | Check the database; stateless chat keeps working |
+
+## Common problems
+
+### The gateway won't start
+
+Read the first error in `docker compose logs gateway`:
+
+- **A `gateway.toml` validation error** names the field. Unknown keys are errors, so check spelling.
+- **"AUTH_ENABLED=true but ADMIN_TOKEN is empty"**: no admin token is set. With Compose it is generated for you;
+  otherwise set `ADMIN_TOKEN`.
+- **Schema newer than this gateway supports**: you are running an older image against an upgraded database.
+  Use the newer image, or restore the pre-upgrade backup.
+- **`savings.baseline … needs a [pricing] entry`**: add a price for the baseline model.
+
+### Every request goes to the fallback
+
+Look at `GET /admin/providers`: an `open` circuit means the primary failed repeatedly. Common causes are a wrong
+or missing API key in `.env` (restart after changing it), an exhausted provider quota (429s) or a wrong
+`base_url`.
+
+### The cache never hits
+
+Only stateless, non-streaming requests with `temperature` unset or 0 and no tools are cached, and only
+byte-identical requests match. Check that `[cache] enabled = true` and the alias doesn't set
+`cache_ttl_seconds = 0`. The `X-Cache` header tells you what happened.
+
+### Costs show `null` or `cost_complete: false`
+
+The model has no `[pricing."provider/model"]` entry (the key must match exactly what the usage report shows), or
+the provider didn't report token usage (Gemini embeddings never do).
+
+### Replies are cut off
+
+The [output cap](/docs/output-caps/) clamped `max_tokens`; the reply ends with `finish_reason: "length"`. Raise
+`default_max_output_tokens` or the alias's `max_output_tokens`, especially for reasoning models.
+
+### My OpenAI SDK call fails with 400 but works against OpenAI
+
+TwinLM rejects parameters it doesn't support instead of ignoring them. The error's `param` names the field; see the
+[compatibility matrix](/docs/compatibility/).
+
+### Changes to `gateway.toml` or `.env` have no effect
+
+Both are read at startup: `docker compose up -d --force-recreate gateway`. With the quickstart file, check that the
+`gateway.toml` mount line is uncommented.
+
+## Getting help
+
+Open an issue at [github.com/rsh-119/TwinLM/issues](https://github.com/rsh-119/TwinLM/issues) with the request
+ID, the status code and the relevant log lines (they contain no prompts or keys).

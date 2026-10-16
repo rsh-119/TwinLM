@@ -6,9 +6,8 @@ provider answers, so they are recorded afterwards: a key that is at its
 TPM limit is rejected on its *next* request (one request can overshoot -
 the standard trade-off without pre-estimating tokens).
 
-ponytail: in-process state, so limits are per gateway instance. Behind a
-load balancer with N instances the effective limit is up to N x the
-configured one; move the windows to Redis (sorted sets) at that point.
+In-process by default; with REDIS_URL the windows live in Redis
+(app.gateway.shared.RedisLimiter) so they hold across gateway instances.
 """
 import time
 from collections import defaultdict, deque
@@ -51,5 +50,8 @@ class SlidingWindowLimiter:
 
 
 @lru_cache
-def get_rate_limiter() -> SlidingWindowLimiter:
-    return SlidingWindowLimiter()
+def get_rate_limiter():
+    from app.gateway.shared import RedisLimiter, get_redis
+
+    redis = get_redis()
+    return RedisLimiter(redis) if redis is not None else SlidingWindowLimiter()

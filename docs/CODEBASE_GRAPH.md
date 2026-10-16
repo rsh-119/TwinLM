@@ -87,8 +87,14 @@ sequenceDiagram
 | Retries, timeouts, circuit breaker | `app/router/model_router.py` (`_call`, `route_stream`), `app/gateway/health.py`, `app/gateway/retry.py` | `test_resilience.py` |
 | A provider's wire format / usage parsing | `app/providers/gemini.py`, `openai_compatible.py`, `base.py` (`TokenUsage.reported`) | `test_providers.py`, `test_accounting.py` |
 | Add a provider type | `app/providers/<new>.py`, `build_provider` + `DEFAULT_CAPABILITIES` in `model_router.py`, `ProviderConfig.type` | `test_providers.py` |
-| Admission: rate limits, budget | `app/api/common.py` (`admit`), `app/gateway/rate_limit.py` | `test_gateway_api.py` |
+| Admission: rate limits | `app/api/common.py` (`admit`), `app/gateway/rate_limit.py` | `test_gateway_api.py` |
+| Budgets (key/team/user/org), reservations, alerts | `app/gateway/budgets.py` (`BudgetTracker.admit`, `maybe_alert`), `_estimate` in `app/api/chat.py`, `/admin/budgets` in `app/api/admin.py`; console `budgets` page | `test_budgets.py` |
+| Semantic cache | `app/gateway/semantic_cache.py`, `_semantic_key` in `app/api/chat.py`, `[cache.semantic]` in `app/gateway/config.py` | `test_semantic_cache.py` |
+| Several instances (Redis shared state) | `app/gateway/shared.py`, `RedisReservations` in `budgets.py`, `forget_key` in `app/auth.py`, `announce`/`follow` in `app/gateway/runtime.py` | `test_shared_state.py` |
 | Output caps, cache eligibility/TTL | `app/gateway/config.py` (`output_cap`, `cache_ttl`), `app/api/chat.py` (`_checked_generation_params`, `_complete`) | `test_cost_controls.py` |
+| Providers/aliases/prices from the admin panel (runtime, no restart) | `app/api/admin_config.py`, `app/gateway/runtime.py` (`effective_config`, `apply`), `app/gateway/secret_box.py`, `app/gateway/presets.py`, `swap_router` in `model_router.py`; console pages `console/app/(app)/providers`, `models` | `test_runtime_config.py` |
+| Console sign-in, people, teams, roles, team keys | `app/console_auth.py`, `app/api/teams.py`, `require_admin` in `app/auth.py` (accepts admin sessions); console Teams/People tabs | `test_teams.py` |
+| Web console (Next.js at /app) | `console/` (pages in `console/app/(app)/`, API client `console/lib/api.ts`), served by `app/main.py` (`CONSOLE_DIR`), cookie auth in `app/console_auth.py` | `test_console_web.py`, `console/e2e/` |
 | Savings report | `app/api/admin.py` (`savings`), `app/database/repository.py` (`savings_rows`) | `test_cost_controls.py` |
 | Cost/usage accounting, outbox | `app/gateway/usage.py`, `app/gateway/pricing.py`, `app/database/repository.py` (`usage_summary`) | `test_accounting.py`, `test_gateway_api.py`, `test_ops.py` |
 | Schema change | model in `app/database/models.py` + new entry appended to `MIGRATIONS` in `app/database/database.py` | `test_ops.py` (SQLite; PostgreSQL with `TEST_DATABASE_URL`) |

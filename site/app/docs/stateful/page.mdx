@@ -1,0 +1,69 @@
+export const metadata = { title: "Conversations and memories" };
+
+# Conversations and memories
+
+<Note title="Optional feature">
+This is outside TwinLM's cost-focused core: it works and is tested, but it isn't being extended. Most apps keep
+their own chat history and use TwinLM statelessly. Turn it off entirely with `STATEFUL_ENABLED=false`.
+</Note>
+
+In **stateful mode** the gateway owns the conversation. The client sends only the new message and a
+`conversation_id`; the history lives in TwinLM's database. When a provider is rate-limited, the conversation
+continues on another provider with the same context and no change for the client.
+
+## How it works
+
+1. Create a conversation for a user.
+2. Send each new user message with the `conversation_id`.
+3. TwinLM builds the context: a **summary** of older messages, the **last 10 messages**, and the user's
+   **memories** (long-term facts), each capped at about 4,000 characters. It then routes as usual and stores both
+   the user message and the reply.
+
+A new summary is generated every 20 messages; it is a separate, billed request that shows up in usage.
+
+```bash
+# 1. create a conversation
+curl -X POST http://localhost:8000/v1/conversations -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" -d '{"user_id": "u1"}'
+# {"conversation_id": "conv_…"}
+
+# 2. send only the new turn
+curl http://localhost:8000/v1/chat/completions -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"conversation_id": "conv_…", "model": "auto", "messages": [{"role": "user", "content": "I build Kafka systems."}]}'
+
+# 3. store a long-term memory for the user
+curl -X POST http://localhost:8000/v1/memories -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" -d '{"user_id": "u1", "content": "Prefers Python examples."}'
+```
+
+With the OpenAI Python SDK, pass the extension through `extra_body`:
+
+```python
+reply = client.chat.completions.create(
+    model="auto",
+    messages=[{"role": "user", "content": "And how do I scale consumers?"}],
+    extra_body={"conversation_id": conversation_id},
+)
+```
+
+## Ownership
+
+- Conversations and memories belong to the **project** of the key that created them; other projects get 404.
+- A **user-bound key** (created with `"user_id": "alice"`) only sees alice's data, and `user_id` may be omitted.
+  Asking for another user explicitly returns 403.
+- A **service key** may act for any user in its project, unless `STATEFUL_REQUIRES_USER_KEYS=true`.
+
+## Limits
+
+- Tools and images are stateless-only: with `conversation_id` they return 400.
+- Two concurrent turns on the same conversation: the second gets **409** (optimistic versioning) instead of
+  interleaving messages.
+- Stateful requests are never cached.
+- Conversations and memories store user text, unlike usage records. Plan retention accordingly
+  ([Operations](/docs/operations/#retention-and-deletion)).
+
+## Endpoints
+
+See [Gateway API](/docs/api/#conversations-and-memories) for the full list: create, read, list messages and
+delete conversations; create and list memories.

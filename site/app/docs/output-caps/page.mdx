@@ -1,0 +1,43 @@
+export const metadata = { title: "Output caps" };
+
+# Output caps
+
+Output tokens usually cost several times more than input tokens. One prompt that
+makes a model write 30,000 tokens on your most expensive model can cost more than a day of normal traffic. Output
+caps set an upper bound on every request.
+
+## How it works
+
+```toml
+default_max_output_tokens = 4096   # top level of gateway.toml; applies to every request
+
+[models.short-answers]
+targets = ["groq/openai/gpt-oss-20b"]
+max_output_tokens = 300            # this alias overrides the default
+```
+
+For each request, the cap is the alias's `max_output_tokens` if set, otherwise `default_max_output_tokens`:
+
+| Client sends | Sent to the provider |
+| --- | --- |
+| No `max_tokens` | `max_tokens = cap` |
+| `max_tokens` below the cap | the client's value |
+| `max_tokens` above the cap | `max_tokens = cap` (clamped) |
+
+A reply that hits the cap ends with `finish_reason: "length"`, exactly as if the client had asked for that limit.
+Caps apply to streaming and non-streaming requests. Omit `default_max_output_tokens` to have no global cap.
+
+## Choosing a cap
+
+- Start from what your app actually displays. A chat bubble rarely needs more than 1,000 tokens; a summary or
+  a classification label needs far less.
+- Check `completion_tokens` per model in [`/admin/usage`](/docs/usage-and-savings/#usage-report) to see what
+  real replies use, then set the cap a little above the high end.
+- **Reasoning models** (o-series, gpt-oss, Gemini thinking) count their hidden reasoning against `max_tokens` on
+  some providers. A low cap can cut them off before they answer. Give aliases that use them a higher cap.
+
+## Why not reject instead of clamping?
+
+Clamping keeps existing apps working: an app written against OpenAI with `max_tokens: 8000` keeps running and
+simply gets shorter answers where it used to run long. If you'd rather know, compare `finish_reason` counts in
+your app or lower the cap gradually.

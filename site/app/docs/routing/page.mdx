@@ -1,0 +1,123 @@
+export const metadata = { title: "Routing and fallback" };
+
+# Routing and fallback
+
+Routing is how TwinLM saves money without your apps knowing: apps ask for a **use case** (`fast`, `smart`), and
+you decide which real models serve it, cheapest first, with backups.
+
+## What `model` can be
+
+| You send | TwinLM does | Fallback |
+| --- | --- | --- |
+| An **alias**, e.g. `auto`, `smart`, `fast` | Tries the alias's targets in order | Yes |
+| A **deployment id**, e.g. `gemini-embedding` | Uses exactly that deployment | No |
+| A **provider name**, e.g. `gemini` | Uses that provider's `default_model` | No |
+| **`provider/model`**, e.g. `groq/openai/gpt-oss-20b` | Uses exactly that model on that provider | No |
+
+`GET /v1/models` lists what a key may use, with capabilities. `GET /admin/models` shows every alias, group,
+deployment, capability and price.
+
+## Aliases
+
+```toml
+[models.auto]
+targets = ["gemini", "groq"]
+description = "Default: Gemini, falling back to Groq"
+
+[models.fast]
+targets = ["groq/openai/gpt-oss-20b", "gemini/gemini-flash-latest"]
+
+[models.smart]
+targets = ["openai/gpt-4o", "gemini/gemini-flash-latest"]
+max_output_tokens = 2048     # optional per-alias output cap
+cache_ttl_seconds = 600      # optional per-alias cache TTL (0 = never cache)
+```
+
+Each target is tried in order. A **cheap-first** setup puts the cheapest model that is good enough first and a
+stronger or different-vendor model after it.
+
+<Note title="TwinLM does not read your prompts to pick a model">
+"Capability routing" is expressed through aliases that you choose per use case. The gateway does not classify
+prompts or guess difficulty.
+</Note>
+
+## Deployments and model groups
+
+A **deployment** is a named provider + model with its own capabilities. Its id appears in usage records and can
+be pinned as `model`. Unnamed `provider/model` targets automatically get the id `provider/model`.
+
+```toml
+[deployments.gemini-embedding]
+provider = "gemini"
+model = "gemini-embedding-001"
+capabilities = ["embeddings"]
+```
+
+An alias can use **`groups`** instead of `targets`. Deployments inside a group serve the *same* model (for
+example two credentials or two regions) and are tried before **falling back** to the next group:
+
+```toml
+[models.mini]
+groups = [
+  ["openai/gpt-4o-mini", "openai-backup/gpt-4o-mini"],   # same model, two credentials
+  ["groq/openai/gpt-oss-20b"],                           # fallback: a different model
+]
+```
+
+Moving to the next deployment in the same group is a retry of the same model. Moving to the next group is a
+fallback, and is counted as one in usage reports.
+
+## Routing strategies
+
+`routing_strategy` (top level of `gateway.toml`) reorders deployments within a group, and groups by their best
+member:
+
+| Strategy | Orders by |
+| --- | --- |
+| `priority` (default) | The order in the config |
+| `cost` | Input + output price per million tokens; unpriced targets last |
+| `latency` | Moving average of recent successful latency; unmeasured targets first so they get measured |
+| `load` | Requests currently in flight to the provider |
+
+Providers whose circuit breaker is open are skipped by every strategy. Deployments without a capability the request
+needs (tools, images, embeddings) are skipped too.
+
+## Failures, retries and fallback
+
+| Failure | Behaviour |
+| --- | --- |
+| 400 / 401 / 403 and other client errors | Returned immediately. Never retried, never falls back |
+| 429 (and Groq's 413 tokens-per-minute) | No retry on the same provider; next target |
+| 5xx, timeout, connection error, malformed response | Retry the same provider (`retry.max_retries`, exponential backoff with full jitter), then the next target |
+
+```toml
+request_timeout_seconds = 60          # total deadline for one request, across retries and fallbacks
+
+[retry]
+max_retries = 1                       # same-deployment retries before moving on
+backoff_base_seconds = 0.2
+backoff_max_seconds = 2.0
+```
+
+Each attempt is bounded by the provider's `timeout_seconds`; the whole request by `request_timeout_seconds`. For
+streams, the deadline bounds the time to the first token, and after that each chunk must arrive within the
+provider timeout. Streams fall back only before the first token.
+
+When a client disconnects, the upstream request is cancelled.
+
+## Circuit breakers
+
+Each provider has a circuit breaker:
+
+```toml
+[circuit_breaker]
+failure_threshold = 5      # consecutive availability failures before opening
+cooldown_seconds = 30      # how long the provider is skipped
+```
+
+After `failure_threshold` consecutive availability failures the circuit **opens** and the provider is skipped
+for `cooldown_seconds`. Then one trial request goes through (**half-open**): success closes the circuit, failure
+reopens it. State is visible at `GET /admin/providers` and in the `llm_provider_health` metric.
+
+Breakers are per provider (endpoint + credential), so a model-specific outage on one endpoint opens it for all
+its models. They are in process memory, so they reset when the gateway restarts.

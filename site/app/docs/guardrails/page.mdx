@@ -1,0 +1,79 @@
+export const metadata = { title: "Guardrails and structured output" };
+
+# Guardrails and structured output
+
+<Note title="Optional features">
+These work and are tested, but they are heuristics around the cost-focused core, not a security product.
+</Note>
+
+## Guardrails
+
+Guardrails check requests before they reach a provider, and replies before they reach your app. Configure them
+per stage:
+
+```toml
+[guardrails]
+max_input_chars = 200000
+
+[guardrails.input]
+secrets = "block"            # don't forward credentials to third-party providers
+pii = "log"
+prompt_injection = "log"
+
+[guardrails.output]
+secrets = "redact"
+```
+
+| Guardrail | Detects | Actions |
+| --- | --- | --- |
+| `secrets` | Private keys; AWS, Google, GitHub and Slack tokens; `sk-`, `gsk-`, `nvapi-` keys; gateway keys; JWTs | `block`, `redact`, `log` |
+| `pii` | Emails, Luhn-valid card numbers, US SSNs, phone numbers | `block`, `redact`, `log` |
+| `prompt_injection` | Common "ignore previous instructions", "reveal the system prompt" and role-override phrasing in user messages | `block`, `log` |
+
+- **block**: a blocked input returns **400** and never reaches the provider; a blocked output returns **502**.
+- **redact**: the match is replaced before sending (input) or returning (output). Redactions also apply to what is
+  stored for stateful conversations.
+- **log**: the request proceeds; the finding is logged and counted in `llm_guardrail_violations_total`.
+
+Requests where secrets or PII were found are never cached.
+
+<Note title="What guardrails can't do">
+Detection is regex-based: it catches common accidental leaks, not a determined attacker. A streamed reply can only
+be checked after it has been sent, so findings in streams are logged, not blocked. Use non-streaming requests where
+output must be blocked before delivery.
+</Note>
+
+## Structured output
+
+Ask for JSON and TwinLM makes sure you get valid JSON, or an error:
+
+```python
+reply = client.chat.completions.create(
+    model="auto",
+    messages=[{"role": "user", "content": "Extract the name and total from: 'Invoice for ACME, $120'"}],
+    response_format={
+        "type": "json_schema",
+        "json_schema": {
+            "name": "invoice",
+            "schema": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}, "total": {"type": "number"}},
+                "required": ["name", "total"],
+            },
+        },
+    },
+)
+```
+
+`{"type": "json_object"}` asks for any valid JSON object.
+
+The gateway instructs the model, parses the reply (stripping code fences), and validates it against the JSON
+Schema. If it is invalid, it asks the model to repair it, up to `max_repair_attempts` times:
+
+```toml
+[structured_output]
+max_repair_attempts = 1      # 0–3
+```
+
+If the reply is still invalid, the request returns **502**. Repair calls are billed and appear in usage. Structured
+output is not available with `stream=true`.

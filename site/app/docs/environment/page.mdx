@@ -1,0 +1,63 @@
+export const metadata = { title: "Environment variables" };
+
+# Environment variables
+
+Secrets and deployment switches come from the environment or a `.env` file next to the gateway. Names are
+case-insensitive. Behaviour (models, routing, prices) lives in [`gateway.toml`](/docs/config/).
+
+## Provider keys
+
+| Variable | Used by |
+| --- | --- |
+| `GEMINI_API_KEY` | `api_key_setting = "gemini_api_key"` |
+| `GROQ_API_KEY` | `api_key_setting = "groq_api_key"` |
+| `OPENAI_API_KEY` | `api_key_setting = "openai_api_key"` |
+| `NVIDIA_API_KEY` | `api_key_setting = "nvidia_api_key"` |
+| *anything else* | Any provider's `api_key_setting`: `deepseek_api_key` reads `DEEPSEEK_API_KEY` |
+| `OLLAMA_BASE_URL` | Not used by the gateway; set the Ollama `base_url` in `gateway.toml` |
+
+## Gateway
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `GATEWAY_CONFIG_PATH` | `gateway.toml` | Path to the behaviour config |
+| `DEFAULT_MODEL` | `auto` | Model used when a request omits `model` |
+| `AUTH_ENABLED` | `true` | Require a gateway key on `/v1`. `false` only for private single-user setups |
+| `ADMIN_TOKEN` | empty | Bearer token for `/admin`. Required when auth is on; empty disables the admin API |
+| `PROVIDER_KEYS_SECRET` | empty | Encrypts provider keys added from the console. Any long random string; Compose generates it. Changing it makes stored keys unreadable |
+| `PROVIDER_KEYS_SECRET_FILE` | empty | File holding that secret (used by Compose) |
+| `AUTH_CACHE_SECONDS` | `30` | How long a validated key is reused without a database lookup |
+| `MAX_CONCURRENT_REQUESTS` | `100` | In-flight request limit; beyond it, 503 "server busy" |
+| `STATEFUL_ENABLED` | `true` | Mount conversations and memories. `false` = pure stateless proxy |
+| `STATEFUL_REQUIRES_USER_KEYS` | `false` | Only user-bound keys may use conversations and memories |
+| `WEB_UI_ENABLED` | `false` | The minimal browser UI. It has no login: keep it private |
+| `LOG_FORMAT` | `json` | `json` or `text` |
+| `LOG_LEVEL` | `INFO` | Python log level |
+
+## Database
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `DATABASE_URL` | `sqlite:///./twinlm.db` (container: `sqlite:////app/data/twinlm.db`) | SQLAlchemy URL. PostgreSQL: `postgresql+psycopg://user:pass@host:5432/db`; plain `postgres://` URLs also work |
+| `DATABASE_PASSWORD_FILE` | empty | File holding the password when `DATABASE_URL` has none (used by Compose secrets) |
+| `DB_POOL_SIZE` | `20` | Persistent PostgreSQL connections |
+| `MIGRATE_ON_STARTUP` | `true` | Apply pending migrations at start. `false` = refuse to start on an outdated schema |
+| `USAGE_SPOOL_PATH` | `./data/usage-spool.db` (container: `/app/data/usage-spool.db`) | Local outbox for usage records. Keep it on a persistent volume |
+
+## Docker Compose only
+
+These are read by the Compose files, not the gateway:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `TWINLM_IMAGE` | `ghcr.io/rsh-119/twinlm:latest` | Gateway image (quickstart file) |
+| `GATEWAY_BIND`, `GATEWAY_PORT` | `127.0.0.1`, `8000` | Where the gateway port is published |
+| `GATEWAY_CONFIG_FILE` | `./gateway.toml` | Config file mounted into the gateway (full stack) |
+| `PROMETHEUS_BIND`, `PROMETHEUS_PORT` | `127.0.0.1`, `9090` | Prometheus |
+| `GRAFANA_BIND`, `GRAFANA_PORT` | `127.0.0.1`, `3001` | Grafana |
+| `TWINLM_DOMAIN`, `CONSOLE_DOMAIN`, `GRAFANA_DOMAIN` | `*.localhost` | Domains for the TLS ingress |
+| `CONSOLE_USER` | `operator` | Basic-auth user for the console and Grafana behind the ingress |
+| `INGRESS_BIND`, `INGRESS_HTTP_PORT`, `INGRESS_HTTPS_PORT` | `0.0.0.0`, `80`, `443` | Ingress ports |
+
+In Compose, `ADMIN_TOKEN` and the database password are generated into the `secrets` volume on first start; you
+don't set them in `.env`.

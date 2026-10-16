@@ -1,0 +1,93 @@
+export const metadata = { title: "Gateway API (/v1)" };
+
+# Gateway API (/v1)
+
+All `/v1` endpoints need `Authorization: Bearer gw_live_…` (unless `AUTH_ENABLED=false`). A running gateway also
+serves interactive OpenAPI docs at `http://localhost:8000/docs`.
+
+## POST /v1/chat/completions
+
+OpenAI chat completions, JSON or SSE. Parameters and limits: [OpenAI compatibility](/docs/compatibility/).
+
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{"model": "auto", "temperature": 0, "messages": [{"role": "user", "content": "Hi"}]}'
+```
+
+```json
+{
+  "id": "chatcmpl-…",
+  "object": "chat.completion",
+  "created": 1760432400,
+  "model": "gemini-flash-latest",
+  "provider": "gemini",
+  "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hello!"}, "finish_reason": "stop"}],
+  "usage": {"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5}
+}
+```
+
+Headers: `X-Request-ID`, `X-Cache: HIT|MISS`.
+
+**Streaming** (`"stream": true`) returns `text/event-stream`. Each `data:` event is a `chat.completion.chunk`
+with the extra fields `provider`, `delta` and `done`; stateless streams end with `data: [DONE]`. Send
+`"stream_options": {"include_usage": true}` to get token usage in the last chunk.
+
+**Stateful** requests add `conversation_id` and send only the new turn. See
+[Conversations](/docs/stateful/).
+
+## POST /v1/embeddings
+
+```bash
+curl http://localhost:8000/v1/embeddings \
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{"model": "embed", "input": ["first text", "second text"]}'
+```
+
+Returns the OpenAI `list` of `embedding` objects with `usage`. `encoding_format` may be `float` or `base64`.
+Routed only to deployments with the `embeddings` capability.
+
+## GET /v1/models
+
+The models and aliases this key may use, with TwinLM's `capabilities` extension:
+
+```json
+{
+  "object": "list",
+  "data": [
+    {"id": "auto", "object": "model", "created": 0, "owned_by": "twinlm", "capabilities": ["chat", "tools", "vision"]},
+    {"id": "embed", "object": "model", "created": 0, "owned_by": "twinlm", "capabilities": ["embeddings"]}
+  ]
+}
+```
+
+## Conversations and memories
+
+Available when `STATEFUL_ENABLED=true` (the default). Details: [Conversations and memories](/docs/stateful/).
+
+| Method and path | Body / query | Returns |
+| --- | --- | --- |
+| `POST /v1/conversations` | `{"user_id": "u1"}` (optional with a user-bound key) | 201 `{"conversation_id": "conv_…"}` |
+| `GET /v1/conversations/{id}` | | `conversation_id`, `user_id`, `summary`, `total_tokens` |
+| `GET /v1/conversations/{id}/messages` | | List of messages with `role`, `content`, `model`, token counts |
+| `DELETE /v1/conversations/{id}` | | 204; deletes the conversation and its messages |
+| `POST /v1/memories` | `{"user_id": "u1", "content": "Prefers Python"}` (≤ 4,000 chars) | 201 memory `id`, `user_id`, `content` |
+| `GET /v1/memories/{user_id}` | `limit` (1–500, default 100), `before` | The user's memories in the caller's project |
+
+## Health and metrics
+
+These need no key.
+
+| Path | Meaning |
+| --- | --- |
+| `GET /health` | Liveness: the process is up. `{"status": "ok"}` |
+| `GET /ready` | Readiness: the database is reachable. Providers aren't checked; outages are handled by fallback |
+| `GET /metrics` | Prometheus metrics. Keep it on an internal network ([Monitoring](/docs/monitoring/)) |
+
+## Request limits
+
+- Request bodies over **1 MiB** get 413 `request body too large`.
+- More than `MAX_CONCURRENT_REQUESTS` (default 100) in flight get 503 `server busy`.
+- `[guardrails] max_input_chars` rejects longer inputs with 400.
+
+Every status code: [Troubleshooting](/docs/troubleshooting/#error-codes).

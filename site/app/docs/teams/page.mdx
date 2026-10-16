@@ -1,0 +1,78 @@
+export const metadata = { title: "Teams and members" };
+
+# Teams and members
+
+People sign in to the console with their email and password, belong to teams, and get keys scoped to their team.
+Spend is tracked per team and per person, and team admins run their own team without an org admin.
+
+## Roles
+
+| | Admin | Team admin | Member |
+| --- | --- | --- | --- |
+| Providers, models, prices, all usage and savings, people | ✅ | – | – |
+| Create and delete teams | ✅ | – | – |
+| Add and remove team members, change their role, reset their password | ✅ | own teams | – |
+| Create and revoke team service keys and members' keys, with limits and budgets | ✅ | own teams | – |
+| Create and revoke **own** keys | ✅ | ✅ | ✅ |
+| Team usage | ✅ | own teams | own keys only |
+
+**Admin** is an org-wide role. **Team admin** and **member** are roles inside one team; a person can be in several
+teams with different roles. **Service** keys belong to a team but to no person: use them for applications and
+bots. They show up in the team's member list as "Service" with their last activity.
+
+## Getting started
+
+1. Open the web console at `http://localhost:8000/app`. On first start it shows **Set up TwinLM**.
+2. Paste the admin token from `docker compose exec gateway cat /run/secrets/admin_token`, enter your name, email
+   and a password, and **Create admin account**. You're signed in.
+3. Create teams and add people from **Teams**; add more admins from **People**.
+
+From the command line instead:
+
+```bash
+docker compose exec gateway python -m app.ops create-admin --email you@company.com --name "Your Name"
+```
+
+## Adding a team and people
+
+- **Teams → Create a team** (admins). The team name is the `project` of its keys, so usage, savings and cache
+  isolation per project are per team.
+- **Teams → Add member** (admins and team admins): email, name, role. A new person gets a **temporary password**,
+  shown once, to send them however you like. They choose their own password at first sign-in. TwinLM sends no email.
+- **People** (admins): everyone, their teams, last sign-in and status. Add people, make someone an admin, disable an
+  account or reset a password.
+
+## Keys per team
+
+On **Teams → Create a key**, a member creates a personal key. A team admin can also create a key for a member, or a
+service key for an application, with allowed models, requests and tokens per minute, and a daily budget. Keys
+belong to the team (`project` = team name) and, for personal keys, to the person (`user_id`).
+
+Removing someone from a team revokes their keys in that team. A team with active keys can't be deleted.
+
+## Last active and export
+
+The members list shows each person's last activity: their latest sign-in or the latest request made with one of
+their keys, whichever is newer. Every table in the console has an **Export CSV** button.
+
+## Security notes
+
+- Passwords are hashed with scrypt; session tokens, like API keys, are stored only as hashes and expire after 12 hours.
+- Sign-in is limited to 10 attempts per minute per email and per address.
+- The admin token still works for setup and recovery. Keep it with operators.
+- There is no SSO yet: identity is the email and password, or which key someone holds.
+
+## API
+
+The console uses these endpoints, which you can also call directly with a session token
+(`POST /auth/login` returns it).
+
+| Method and path | Who | Purpose |
+| --- | --- | --- |
+| `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, `POST /auth/password` | anyone | Sign in, sign out, current user and teams, change password |
+| `GET/POST /admin/users`, `PATCH /admin/users/{id}` | admin | People: list, add (returns a temporary password), role, disable, reset password |
+| `POST /admin/teams`, `DELETE /admin/teams/{id}` | admin | Create and delete teams |
+| `GET /console/teams` | signed in | Your teams (all, for admins) with members, keys and 30-day spend |
+| `GET/POST /console/teams/{id}/members`, `PATCH/DELETE …/members/{user_id}`, `POST …/members/{user_id}/reset-password` | team admin (list: members) | Members |
+| `GET/POST /console/teams/{id}/keys`, `DELETE …/keys/{key_id}` | team admin, or members for their own keys | Team keys |
+| `GET /console/teams/{id}/usage` | team admin (team), member (own keys) | Usage |

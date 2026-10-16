@@ -1,0 +1,63 @@
+export const metadata = { title: "Monitoring" };
+
+# Monitoring
+
+## Logs
+
+The gateway writes JSON lines (`LOG_FORMAT=json`) to stdout, each with a `request_id` that matches the response's
+`X-Request-ID` header and the usage record. Bearer tokens, gateway keys, provider keys and `?key=` query parameters
+are redacted from every line. **Prompts are never logged.**
+
+```bash
+docker compose logs -f gateway
+```
+
+## Metrics
+
+`GET /metrics` serves Prometheus metrics. It is unauthenticated, like most exporters: keep it on an internal network
+(the TLS ingress never exposes it).
+
+| Metric | What |
+| --- | --- |
+| `llm_requests_total` | Requests by provider, model and status |
+| `llm_request_latency_seconds` | End-to-end latency |
+| `llm_provider_latency_seconds` | Time spent waiting on providers |
+| `llm_time_to_first_token_seconds` | Streaming time to first token |
+| `llm_request_errors_total` | Errors by type |
+| `llm_tokens_total` | Prompt and completion tokens |
+| `llm_cost_usd_total` | Known cost |
+| `llm_unpriced_calls_total` | Calls with unknown price or usage |
+| `llm_fallback_total` | Fallbacks to another group |
+| `llm_retries_total` | Same-deployment retries |
+| `llm_cache_hits_total`, `llm_cache_misses_total` | Cache effectiveness |
+| `llm_provider_health` | Circuit-breaker state per provider |
+| `llm_active_requests` | Requests in flight |
+| `llm_rate_limited_total` | Requests rejected by RPM, TPM or budget |
+| `llm_guardrail_violations_total` | Guardrail findings |
+| `llm_structured_output_failures_total` | Replies that stayed invalid after repair |
+
+## Prometheus, alerts and Grafana
+
+The `monitoring` profile of the full Compose stack starts Prometheus with alert rules and a provisioned Grafana
+dashboard:
+
+```bash
+docker compose --profile monitoring up -d
+```
+
+- **Grafana** at `http://localhost:3001`: the "TwinLM Gateway" dashboard, readable without logging in on
+  localhost. Admin password: `docker compose exec grafana cat /run/secrets/grafana_password`.
+- **Prometheus** at `http://localhost:9090` evaluates `monitoring/alerts.yml`: gateway down, high error rate, open
+  circuit, usage outbox backlog, deadletters and write failures, and unpriced calls.
+
+Prometheus evaluates the rules but doesn't notify anyone. To get emails, Slack messages or pages, add an
+Alertmanager with a receiver.
+
+## Web console
+
+The web console at `http://localhost:8000/app` shows provider health (refreshed every 10 seconds), usage and
+savings, and lets admins clear the cache. For load tests, use `python loadtest/bench.py`.
+
+## Tracing
+
+There is no OpenTelemetry tracing. Request IDs correlate logs, responses and usage records.

@@ -120,7 +120,7 @@ def fake_providers():
 def build_services(**sections):
     """Gateway services from an isolated config - tests never read the
     repo's gateway.toml. `sections` are GatewayConfig fields."""
-    from app.api.common import GatewayServices
+    from app.api.common import GatewayServices, semantic_cache_for
     from app.gateway.cache import ResponseCache
     from app.gateway.config import GatewayConfig
     from app.gateway.guardrails import GuardrailEngine
@@ -132,6 +132,7 @@ def build_services(**sections):
         limiter=SlidingWindowLimiter(),
         cache=ResponseCache(config.cache.ttl_seconds, config.cache.max_entries),
         guardrails=GuardrailEngine(config.guardrails),
+        semantic_cache=semantic_cache_for(config),
     )
 
 

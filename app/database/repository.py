@@ -254,16 +254,24 @@ def add_request_log(db: Session, **fields) -> RequestLog:
     return log
 
 
-def sum_cost_since(db: Session, api_key_id: str, since: datetime) -> float:
+def sum_cost_since(
+    db: Session, since: datetime, api_key_id: Optional[str] = None,
+    project: Optional[str] = None, user_id: Optional[str] = None,
+) -> float:
+    """Known cost since `since`; no filter = the whole organization."""
+    filters = {RequestLog.api_key_id: api_key_id, RequestLog.project: project, RequestLog.user_id: user_id}
     total = (
         db.query(func.sum(RequestLog.cost_usd))
-        .filter(RequestLog.api_key_id == api_key_id, RequestLog.created_at >= since)
+        .filter(RequestLog.created_at >= since, *[col == value for col, value in filters.items() if value is not None])
         .scalar()
     )
     return total or 0.0
 
 
-def usage_summary(db: Session, since: datetime, group_by: str) -> List[dict]:
+def usage_summary(
+    db: Session, since: datetime, group_by: str,
+    project: Optional[str] = None, api_key_ids: Optional[Sequence[str]] = None,
+) -> List[dict]:
     """Aggregates over request_logs since `since`, grouped by one of
     provider | model | deployment | project | api_key_id. Grouping by "model"
     groups by provider+model, since the same model name can exist on two
@@ -272,7 +280,8 @@ def usage_summary(db: Session, since: datetime, group_by: str) -> List[dict]:
     Token sums count provider consumption only, so cache hits (no provider
     call) are excluded. `cost_usd` sums *known* costs; `unpriced_requests`
     counts rows that reached a provider but whose cost is unknown (no price
-    or no usage reported) - when it is non-zero the cost is incomplete."""
+    or no usage reported) - when it is non-zero the cost is incomplete.
+    `project` / `api_key_ids` narrow it to one team / some keys."""
     columns = {
         "provider": [RequestLog.provider],
         "model": [RequestLog.provider, RequestLog.model],
@@ -297,6 +306,8 @@ def usage_summary(db: Session, since: datetime, group_by: str) -> List[dict]:
             func.avg(RequestLog.ttft_ms),
         )
         .filter(RequestLog.created_at >= since)
+        .filter(*([RequestLog.project == project] if project is not None else []))
+        .filter(*([RequestLog.api_key_id.in_(list(api_key_ids))] if api_key_ids is not None else []))
         .group_by(*columns)
         .all()
     )
@@ -322,6 +333,23 @@ def usage_summary(db: Session, since: datetime, group_by: str) -> List[dict]:
             }
         )
     return out
+
+
+def daily_usage(
+    db: Session, since: datetime, project: Optional[str] = None, api_key_ids: Optional[Sequence[str]] = None,
+) -> List[dict]:
+    """Requests, known cost and cache hits per UTC day, oldest first."""
+    day = func.date(RequestLog.created_at)
+    rows = (
+        db.query(day, func.count(RequestLog.id), func.sum(RequestLog.cost_usd),
+                 func.sum(case((RequestLog.cache_hit.is_(True), 1), else_=0)))
+        .filter(RequestLog.created_at >= since)
+        .filter(*([RequestLog.project == project] if project is not None else []))
+        .filter(*([RequestLog.api_key_id.in_(list(api_key_ids))] if api_key_ids is not None else []))
+        .group_by(day).order_by(day).all()
+    )
+    return [{"date": str(d), "requests": n, "cost_usd": round(c or 0.0, 8), "cache_hits": h or 0}
+            for d, n, c, h in rows]
 
 
 def savings_rows(db: Session, since: datetime, group_by: str) -> List[tuple]:

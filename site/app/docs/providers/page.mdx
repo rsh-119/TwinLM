@@ -1,0 +1,223 @@
+export const metadata = { title: "Providers" };
+
+# Providers
+
+TwinLM has three adapter types. Almost every hosted or self-hosted model server speaks the OpenAI API, so one
+adapter covers most of them.
+
+| `type` | Covers | Default capabilities |
+| --- | --- | --- |
+| `openai_compatible` | OpenAI, Groq, DeepSeek, Mistral, Together, Fireworks, OpenRouter, NVIDIA NIM, Ollama, vLLM, LM Studio, … | chat, tools, vision, embeddings |
+| `gemini` | Google Gemini (native API) | chat, tools, vision, embeddings |
+| `mock` | No network; instant fake replies for tests and demos | chat, embeddings |
+
+<Note title="Tested status">
+Gemini and Groq are enabled in the shipped config and exercised regularly. Other OpenAI-compatible services
+use the same adapter but have not been tested against their live APIs; try one with a small request first.
+</Note>
+
+## Adding a provider from the console
+
+The quickest way, with no file to edit and no restart: open the web console (`http://localhost:8000/app`), sign in as an admin,
+and go to **Providers → Add provider**.
+
+1. Pick a provider: Anthropic, OpenAI, Azure OpenAI, Mistral, DeepSeek, Groq, Gemini, xAI, Together, OpenRouter,
+   Fireworks, Perplexity, Cerebras, NVIDIA NIM, Hugging Face, Cohere, Ollama, LM Studio, or any custom
+   OpenAI-compatible endpoint. For Azure, replace `YOUR-RESOURCE` in the endpoint and use your deployment name as
+   the model; TwinLM sends Azure's `api-key` header. The endpoint and model list are filled in.
+2. Choose the default model (or type any model the provider offers) and paste the API key.
+3. **Test connection** sends one tiny request (1 output token) with that key and shows the provider's answer or
+   its exact error.
+4. **Save provider.** It is live immediately.
+5. On the **Models** page, add it to a model, for example put `anthropic/claude-haiku-4-5` first in `smart`, and
+   enter its prices so cost and savings include it.
+
+From a provider's **⋯** menu you can disable or re-enable a provider, replace its key, test it again, or delete it
+(after removing it from every model that uses it).
+
+<Note title="How keys are stored">
+Keys entered in the console are encrypted in the database with `PROVIDER_KEYS_SECRET` (Compose generates one)
+and are never shown again, only their last four characters. Anyone with the admin token can use them through the
+gateway but cannot read them back. If the secret changes, stored keys can't be decrypted and must be entered
+again. Without a secret, the console can only add keyless providers such as Ollama.
+</Note>
+
+Anthropic is reached through its own OpenAI-compatible endpoint, which Anthropic describes as a compatibility
+layer: core chat, streaming, tools and images work, but some Claude-specific features don't.
+
+## Adding a provider in gateway.toml
+
+A provider is one endpoint plus one credential. Add a block to [`gateway.toml`](/docs/config/), then put the key
+in the environment (or `.env`) under the name given by `api_key_setting`, upper-cased.
+
+```toml
+[providers.openai]
+type = "openai_compatible"
+base_url = "https://api.openai.com/v1"
+default_model = "gpt-4o-mini"
+api_key_setting = "openai_api_key"     # reads OPENAI_API_KEY
+timeout_seconds = 30
+```
+
+`api_key_setting` can be any name: `deepseek_api_key` reads `DEEPSEEK_API_KEY`, `mistral_api_key` reads
+`MISTRAL_API_KEY`, and so on. Never put the key itself in `gateway.toml`.
+
+Then use it in an alias, and add its price so cost and savings are tracked:
+
+```toml
+[models.auto]
+targets = ["openai/gpt-4o-mini", "gemini"]
+
+[pricing."openai/gpt-4o-mini"]
+input_per_million = 0.15
+output_per_million = 0.60
+```
+
+Restart the gateway (`docker compose up -d gateway`). Config errors fail at startup with the field name.
+
+## Examples
+
+### OpenAI
+
+```toml
+[providers.openai]
+type = "openai_compatible"
+base_url = "https://api.openai.com/v1"
+default_model = "gpt-4o-mini"
+api_key_setting = "openai_api_key"
+```
+
+### Groq
+
+```toml
+[providers.groq]
+type = "openai_compatible"
+base_url = "https://api.groq.com/openai/v1"
+default_model = "openai/gpt-oss-20b"
+api_key_setting = "groq_api_key"
+capabilities = ["chat", "tools"]      # no image input, no embeddings API
+```
+
+### Google Gemini
+
+```toml
+[providers.gemini]
+type = "gemini"
+default_model = "gemini-flash-latest"
+api_key_setting = "gemini_api_key"
+capabilities = ["chat", "tools", "vision"]
+
+[deployments.gemini-embedding]        # embeddings use a different model
+provider = "gemini"
+model = "gemini-embedding-001"
+capabilities = ["embeddings"]
+```
+
+### DeepSeek
+
+```toml
+[providers.deepseek]
+type = "openai_compatible"
+base_url = "https://api.deepseek.com/v1"
+default_model = "deepseek-chat"
+api_key_setting = "deepseek_api_key"
+capabilities = ["chat", "tools"]
+```
+
+### Mistral
+
+```toml
+[providers.mistral]
+type = "openai_compatible"
+base_url = "https://api.mistral.ai/v1"
+default_model = "mistral-small-latest"
+api_key_setting = "mistral_api_key"
+```
+
+### Together AI
+
+```toml
+[providers.together]
+type = "openai_compatible"
+base_url = "https://api.together.xyz/v1"
+default_model = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+api_key_setting = "together_api_key"
+```
+
+### OpenRouter
+
+```toml
+[providers.openrouter]
+type = "openai_compatible"
+base_url = "https://openrouter.ai/api/v1"
+default_model = "openai/gpt-4o-mini"
+api_key_setting = "openrouter_api_key"
+```
+
+### Ollama (local models)
+
+```toml
+[providers.ollama]
+type = "openai_compatible"
+base_url = "http://host.docker.internal:11434/v1"   # http://localhost:11434/v1 outside Docker
+default_model = "llama3.2"
+timeout_seconds = 120
+capabilities = ["chat"]
+# no api_key_setting: Ollama needs no key
+```
+
+### vLLM or any self-hosted OpenAI-compatible server
+
+```toml
+[providers.vllm]
+type = "openai_compatible"
+base_url = "http://my-gpu-box:8000/v1"
+default_model = "Qwen/Qwen2.5-7B-Instruct"
+api_key_setting = "vllm_api_key"       # omit if the server needs no key
+```
+
+### Mock
+
+```toml
+[providers.mock]
+type = "mock"
+default_model = "mock-1"
+mock_latency_seconds = 0.05
+mock_failure_rate = 0.02               # 2% simulated failures, to watch fallback
+```
+
+## Two keys for one provider
+
+A provider is also the circuit-breaker unit. To spread load over two credentials (or regions) for the same model,
+define two providers and put them in one [model group](/docs/routing/#deployments-and-model-groups):
+
+```toml
+[providers.openai]
+type = "openai_compatible"
+base_url = "https://api.openai.com/v1"
+default_model = "gpt-4o-mini"
+api_key_setting = "openai_api_key"
+
+[providers.openai-backup]
+type = "openai_compatible"
+base_url = "https://api.openai.com/v1"
+default_model = "gpt-4o-mini"
+api_key_setting = "openai_backup_api_key"
+
+[models.mini]
+groups = [["openai/gpt-4o-mini", "openai-backup/gpt-4o-mini"], ["groq/openai/gpt-oss-20b"]]
+```
+
+## Disabling a provider
+
+Set `enabled = false` in its block. Alias targets on a disabled provider are skipped; an alias left with no enabled
+targets is dropped with a warning in the log. A target naming a provider that isn't configured at all fails at
+startup.
+
+## Known provider quirks
+
+- **Gemini** takes images only as base64 `data:` URLs, ignores `parallel_tool_calls=false`, and its embeddings
+  report no token usage (recorded as unknown).
+- **Groq** returns 413 for tokens-per-minute limits; TwinLM treats it like a 429 and moves to the next target.
+- **Reasoning models** count their thinking against `max_tokens` on some providers. Raise the
+  [output cap](/docs/output-caps/) for aliases that use them.

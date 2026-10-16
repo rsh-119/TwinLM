@@ -5,10 +5,11 @@
 # ports 80/443. The *.localhost defaults use Caddy's internal CA (local test).
 #
 # - API host: only /v1/* is proxied; every call needs a gateway API key.
-#   /admin, /metrics and /docs are never exposed here - operators use the
-#   console or an SSH tunnel to 127.0.0.1:8000.
-# - Console and Grafana hosts: HTTP basic auth (user CONSOLE_USER, password
-#   in the `console_password` secret) in front of operator UIs.
+#   /admin, /metrics and /docs are never exposed here.
+# - Console host: the web console (/app) and the APIs it uses. People sign
+#   in with their own accounts; /metrics and /docs stay private.
+# - Grafana host: HTTP basic auth (user CONSOLE_USER, password in the
+#   `console_password` secret).
 
 {
 	# email ops@example.com   # set for certificate expiry notices
@@ -26,10 +27,17 @@
 }
 
 {$CONSOLE_DOMAIN} {
-	basic_auth {
-		{$CONSOLE_USER} {$CONSOLE_PASSWORD_HASH}
+	encode gzip
+	@console path /app /app/* /auth/* /console/* /admin/* /v1/*
+	handle @console {
+		reverse_proxy gateway:8000
 	}
-	reverse_proxy ui:8501
+	handle / {
+		redir /app/ 302
+	}
+	handle {
+		respond "not found" 404
+	}
 	header -Server
 }
 

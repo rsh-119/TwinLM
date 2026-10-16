@@ -6,9 +6,8 @@ answers never cross projects. What gets cached is decided by the caller
 (see app/api/chat.py): never stateful turns, streams, or requests the
 guardrails flag as containing secrets/PII.
 
-ponytail: in-process LRU, so each gateway instance has its own cache and
-it is lost on restart. Swap for Redis (same get/set/clear surface) when
-running more than one instance.
+In-process LRU by default (lost on restart); with REDIS_URL it is shared
+by all gateway instances (app.gateway.shared.RedisResponseCache).
 """
 import hashlib
 import json
@@ -74,6 +73,11 @@ class ResponseCache:
 
 
 @lru_cache
-def get_response_cache() -> ResponseCache:
+def get_response_cache():
+    from app.gateway.shared import RedisResponseCache, get_redis
+
     config = get_gateway_config().cache
+    redis = get_redis()
+    if redis is not None:
+        return RedisResponseCache(redis, config.ttl_seconds, max_bytes=config.max_bytes)
     return ResponseCache(config.ttl_seconds, config.max_entries, max_bytes=config.max_bytes)

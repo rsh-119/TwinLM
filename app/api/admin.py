@@ -13,6 +13,8 @@ from app.api.common import GatewayServices, get_services
 from app.auth import DEFAULT_PROJECT, forget_key, generate_key, require_admin
 from app.database import repository
 from app.database.database import get_db
+from app.database.models import Budget, BudgetAlert, User
+from app.gateway import budgets
 from app.gateway.pricing import request_cost
 from app.providers.base import TokenUsage
 from app.router.model_router import ModelRouter, get_model_router
@@ -68,6 +70,12 @@ def usage(
         },
         "groups": groups,
     }
+
+
+@router.get("/usage/daily")
+def usage_daily(days: int = Query(default=30, ge=1, le=366), db: Session = Depends(get_db)) -> dict:
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    return {"since": since.isoformat(), "days": repository.daily_usage(db, since)}
 
 
 @router.get("/savings")
@@ -224,6 +232,67 @@ def revoke_key(key_id: str, db: Session = Depends(get_db)) -> dict:
     return _key_view(key)
 
 
+class BudgetIn(BaseModel):
+    scope: Literal["org", "team", "user"]
+    # team name (= project), user id; ignored for "org"
+    target: str = Field(default="*", min_length=1, max_length=200)
+    period: Literal["daily", "monthly"] = "monthly"
+    limit_usd: float = Field(gt=0)
+
+
+def _budget_view(db: Session, budget: Budget, services: GatewayServices) -> dict:
+    view = budgets.status(db, budget, services.budgets, services.usage_writer)
+    if budget.scope == "user":
+        user = db.get(User, budget.target)
+        view["target_name"] = user.name if user else None
+    return view
+
+
+@router.get("/budgets")
+def list_budgets(db: Session = Depends(get_db), services: GatewayServices = Depends(get_services)) -> List[dict]:
+    """Every budget with its spend in the current period."""
+    rows = db.query(Budget).order_by(Budget.scope, Budget.target, Budget.period).all()
+    return [_budget_view(db, b, services) for b in rows]
+
+
+@router.put("/budgets")
+def set_budget(body: BudgetIn, db: Session = Depends(get_db),
+               services: GatewayServices = Depends(get_services)) -> dict:
+    """Create or change the budget for (scope, target, period). Applies to
+    the next request."""
+    target = "*" if body.scope == "org" else body.target
+    budget = db.query(Budget).filter(Budget.scope == body.scope, Budget.target == target,
+                                     Budget.period == body.period).first()
+    if budget is None:
+        budget = Budget(scope=body.scope, target=target, period=body.period, limit_usd=body.limit_usd)
+        db.add(budget)
+    budget.limit_usd = body.limit_usd
+    db.commit()
+    return _budget_view(db, budget, services)
+
+
+@router.delete("/budgets/{budget_id}")
+def delete_budget(budget_id: str, db: Session = Depends(get_db)) -> dict:
+    budget = db.get(Budget, budget_id)
+    if budget is None:
+        raise HTTPException(status_code=404, detail="budget not found")
+    db.query(BudgetAlert).filter(BudgetAlert.budget_id == budget_id).delete()
+    db.delete(budget)
+    db.commit()
+    return {"deleted": budget_id}
+
+
+@router.get("/budget-alerts")
+def budget_alerts(limit: int = Query(default=50, ge=1, le=500), db: Session = Depends(get_db)) -> List[dict]:
+    """Thresholds crossed (80%, 100%), newest first."""
+    rows = (db.query(BudgetAlert, Budget).join(Budget, Budget.id == BudgetAlert.budget_id)
+            .order_by(BudgetAlert.created_at.desc()).limit(limit).all())
+    return [{"id": a.id, "budget_id": b.id, "budget": budgets.describe(b), "threshold_pct": a.threshold,
+             "spent_usd": a.spent_usd, "limit_usd": a.limit_usd, "period_start": a.period_start.isoformat(),
+             "created_at": a.created_at.isoformat()} for a, b in rows]
+
+
 @router.delete("/cache")
 def clear_cache(services: GatewayServices = Depends(get_services)) -> dict:
-    return {"cleared": services.cache.clear()}
+    semantic = services.semantic_cache.clear() if services.semantic_cache is not None else 0
+    return {"cleared": services.cache.clear() + semantic}

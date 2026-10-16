@@ -20,4 +20,11 @@ Dockerfile
 docker-compose.yml
 .dockerignore
 .gitignore
-ui/
+console/node_modules/
+console/.next/
+console/out/
+console/e2e/
+console/test-results/
+site/
+backups/
+.impeccable/

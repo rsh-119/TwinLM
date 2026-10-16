@@ -339,3 +339,15 @@ async def test_gemini_candidate_without_parts_is_a_length_finish_not_an_outage(m
     }]})
     result = await GeminiProvider(api_key="k").generate([{"role": "user", "content": "q"}], "m")
     assert (result.content, result.finish_reason) == ("", "length")
+
+
+def test_provider_key_from_any_env_setting(monkeypatch):
+    from app.config import Settings
+    from app.router.model_router import provider_api_key
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deep")
+    settings = Settings(_env_file=None, groq_api_key="gsk-1")
+    assert provider_api_key(settings, "groq_api_key") == "gsk-1"
+    assert provider_api_key(settings, "deepseek_api_key") == "sk-deep"
+    assert provider_api_key(settings, "missing_api_key") == ""
+    assert provider_api_key(settings, None) == ""
