@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import {
-  CheckCircle2, ExternalLink, KeySquare, Loader2, MoreHorizontal, Plug, Plus, Power, Trash2, XCircle, Zap,
+  Boxes, CheckCircle2, ExternalLink, KeySquare, Loader2, MoreHorizontal, Plug, Plus, Power, Trash2, XCircle, Zap,
 } from "lucide-react";
 import { useState } from "react";
 import { PageHeader, RowsSkeleton, StatusDot } from "@/components/common";
@@ -17,6 +17,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { del, get, patch, post } from "@/lib/api";
 import { useAction } from "@/lib/hooks";
@@ -43,6 +46,70 @@ function TestOutcome({ result }: { result: TestResult | null }) {
   );
 }
 
+const OTHER = "__other__";
+
+/** Model dropdown: the preset's suggestions (lightest first) and, once a test
+ * has run, every chat model the key can use. "Other" allows any name. */
+function ModelPicker({ id, value, onChange, suggested, live }: {
+  id: string;
+  value: string;
+  onChange: (model: string) => void;
+  suggested: string[];
+  live?: string[];
+}) {
+  const known = live?.length ? live : suggested;
+  const [custom, setCustom] = useState(!!value && !known.includes(value));
+  const recommended = live?.length ? suggested.filter((m) => live.includes(m)) : suggested;
+  const rest = (live ?? []).filter((m) => !recommended.includes(m));
+  if (custom || !known.length) {
+    return (
+      <div className="flex gap-2">
+        <Input id={id} required value={value} onChange={(e) => onChange(e.target.value)} placeholder="model name"
+          className="font-mono text-xs" />
+        {!!known.length && (
+          <Button type="button" variant="ghost" size="sm" onClick={() => { setCustom(false); onChange(recommended[0] ?? known[0]); }}>
+            List
+          </Button>
+        )}
+      </div>
+    );
+  }
+  return (
+    <Select value={value || undefined} onValueChange={(m) => (m === OTHER ? setCustom(true) : onChange(m))}>
+      <SelectTrigger id={id} className="w-full font-mono text-xs"><SelectValue placeholder="Choose a model" /></SelectTrigger>
+      <SelectContent className="max-h-80">
+        {!!recommended.length && (
+          <SelectGroup>
+            <SelectLabel>Recommended, lightest first</SelectLabel>
+            {recommended.map((m, i) => (
+              <SelectItem key={m} value={m} className="font-mono text-xs">
+                {m}{i === 0 && <span className="ml-1 font-sans text-muted-foreground">· lightest</span>}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        )}
+        {!!rest.length && (
+          <SelectGroup>
+            <SelectSeparator />
+            <SelectLabel>All models on this key</SelectLabel>
+            {rest.map((m) => <SelectItem key={m} value={m} className="font-mono text-xs">{m}</SelectItem>)}
+          </SelectGroup>
+        )}
+        <SelectSeparator />
+        <SelectItem value={OTHER}>Other model…</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+
+/** After a test: if the chosen model isn't available on this key, switch to
+ * the lightest one that is. Returns the note to show, if it switched. */
+function adoptRecommended(result: TestResult, model: string, setModel: (m: string) => void): string | null {
+  if (!result.models?.length || result.models.includes(model) || !result.recommended) return null;
+  setModel(result.recommended);
+  return `${model} isn't available on this key, so ${result.recommended} is selected. Test again to confirm.`;
+}
+
 function AddProvider({ existing }: { existing: string[] }) {
   const presets = useQuery(presetsQuery);
   const [open, setOpen] = useState(false);
@@ -50,12 +117,14 @@ function AddProvider({ existing }: { existing: string[] }) {
   const [form, setForm] = useState({ name: "", model: "", base_url: "", api_key: "" });
   const [test, setTest] = useState<TestResult | null>(null);
   const [testing, setTesting] = useState(false);
+  const [switched, setSwitched] = useState<string | null>(null);
   const preset = presetId ? presets.data?.[presetId] : undefined;
 
   const pick = (id: string) => {
     const p = presets.data![id];
     setPresetId(id);
     setTest(null);
+    setSwitched(null);
     setForm({ name: existing.includes(id) ? `${id}-2` : id, model: p.default_model, base_url: p.base_url ?? "", api_key: "" });
   };
   const reset = (next: boolean) => {
@@ -68,9 +137,11 @@ function AddProvider({ existing }: { existing: string[] }) {
   const runTest = async () => {
     setTesting(true);
     try {
-      setTest(await post<TestResult>("/admin/config/test", {
+      const result = await post<TestResult>("/admin/config/test", {
         preset: presetId, base_url: form.base_url || null, api_key: form.api_key || null, model: form.model,
-      }));
+      });
+      setTest(result);
+      setSwitched(adoptRecommended(result, form.model, (model) => setForm((f) => ({ ...f, model }))));
     } catch (e) {
       setTest({ ok: false, model: form.model, latency_ms: 0, error: (e as Error).message });
     } finally {
@@ -83,7 +154,6 @@ function AddProvider({ existing }: { existing: string[] }) {
     }),
     { success: `${form.name} added — use it on the Models page`, invalidate: [["providers"], ["aliases"]], onSuccess: () => reset(false) },
   );
-  const models = test?.models?.length ? test.models : preset?.models ?? [];
 
   return (
     <Sheet open={open} onOpenChange={reset}>
@@ -103,23 +173,27 @@ function AddProvider({ existing }: { existing: string[] }) {
             {Object.entries(presets.data ?? {}).map(([id, p]) => (
               <button key={id} type="button" onClick={() => pick(id)}
                 className="rounded-lg border p-3 text-left transition-colors hover:border-brand hover:bg-brand/5">
-                <p className="text-sm font-medium">{p.label}</p>
+                <p className="flex items-center gap-1.5 text-sm font-medium">
+                  {p.label}
+                  {p.free_tier && <Badge variant="outline" className="border-success/40 px-1.5 py-0 text-[10px] font-normal">Free tier</Badge>}
+                </p>
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">{p.default_model || "any model"}</p>
               </button>
             ))}
           </div>
         ) : (
           <form className="space-y-4 px-4" onSubmit={(e) => { e.preventDefault(); save.mutate(undefined); }}>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="pv-name">Name</Label>
-                <Input id="pv-name" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value.toLowerCase() })} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="pv-model">Default model</Label>
-                <Input id="pv-model" required list="pv-models" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} />
-                <datalist id="pv-models">{models.map((m) => <option key={m} value={m} />)}</datalist>
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="pv-name">Name</Label>
+              <Input id="pv-name" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value.toLowerCase() })} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pv-model">Default model</Label>
+              <ModelPicker key={test?.models?.length ? "live" : "suggested"} id="pv-model" value={form.model}
+                onChange={(model) => setForm({ ...form, model })} suggested={preset.models} live={test?.models} />
+              <p className="text-xs text-muted-foreground">
+                {test?.models?.length ? `${test.models.length} models on this key.` : "Test the connection to list every model on your key."}
+              </p>
             </div>
             {preset.type !== "gemini" && (
               <div className="space-y-2">
@@ -143,6 +217,12 @@ function AddProvider({ existing }: { existing: string[] }) {
               {preset.note && <p className="text-xs text-muted-foreground">{preset.note}</p>}
             </div>
             <TestOutcome result={test} />
+            {switched && <p className="text-sm text-muted-foreground">{switched}</p>}
+            {!test && preset.free_tier && (
+              <p className="text-xs text-muted-foreground">
+                {preset.label} has a free tier: start on the lightest model, move up only where quality needs it.
+              </p>
+            )}
             <SheetFooter className="flex-row gap-2 px-0">
               <Button type="button" variant="ghost" onClick={() => setPresetId(null)}>Back</Button>
               <Button type="button" variant="outline" className="ml-auto" onClick={runTest} disabled={testing || !form.model}>
@@ -157,7 +237,61 @@ function AddProvider({ existing }: { existing: string[] }) {
   );
 }
 
+function ChangeModel({ p, open, onOpenChange }: { p: ProviderRow; open: boolean; onOpenChange: (o: boolean) => void }) {
+  const presets = useQuery(presetsQuery);
+  const [model, setModel] = useState(p.default_model);
+  const [switched, setSwitched] = useState<string | null>(null);
+  // the key's live model list: one tiny test request, made when the dialog opens
+  const live = useQuery({
+    queryKey: ["provider-models", p.name], enabled: open, staleTime: 5 * 60_000,
+    queryFn: () => post<TestResult>("/admin/config/test", { name: p.name }),
+  });
+  const save = useAction(() => patch(`/admin/config/providers/${p.name}`, { default_model: model }), {
+    success: `${p.name} now uses ${model}`, invalidate: [["providers"], ["aliases"]], onSuccess: () => onOpenChange(false),
+  });
+  const suggested = (p.preset && presets.data?.[p.preset]?.models) || [p.default_model];
+  return (
+    <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (o) { setModel(p.default_model); setSwitched(null); } }}>
+      <DialogContent>
+        <form onSubmit={(e) => { e.preventDefault(); save.mutate(undefined); }} className="space-y-4">
+          <DialogHeader>
+            <DialogTitle>Change {p.name} model</DialogTitle>
+            <DialogDescription>
+              Used when an app or a model on the Models page asks for {p.name} without naming a model.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor={`cm-${p.name}`}>Default model</Label>
+            {live.isLoading ? (
+              <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Loading the models on this key…</p>
+            ) : (
+              <ModelPicker key={live.data?.models?.length ? "live" : "suggested"} id={`cm-${p.name}`} value={model}
+                onChange={(m) => { setModel(m); setSwitched(null); }} suggested={suggested} live={live.data?.models} />
+            )}
+            {live.data && !live.data.models?.length && (
+              <p className="text-xs text-muted-foreground">{p.name} doesn&apos;t list its models; type any model name it accepts.</p>
+            )}
+            {live.data && model === p.default_model && !switched && live.data.models?.length && !live.data.models.includes(model) && (
+              <p className="text-sm text-muted-foreground">
+                {model} isn&apos;t available on this key.{" "}
+                {live.data.recommended && (
+                  <button type="button" className="text-brand hover:underline"
+                    onClick={() => setSwitched(adoptRecommended(live.data!, model, setModel))}>
+                    Use {live.data.recommended}
+                  </button>
+                )}
+              </p>
+            )}
+          </div>
+          <DialogFooter><Button type="submit" disabled={save.isPending || !model || model === p.default_model}>Save model</Button></DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function ProviderMenu({ p }: { p: ProviderRow }) {
+  const [changeModel, setChangeModel] = useState(false);
   const [rotate, setRotate] = useState(false);
   const [key, setKey] = useState("");
   const [result, setResult] = useState<TestResult | null>(null);
@@ -178,12 +312,14 @@ function ProviderMenu({ p }: { p: ProviderRow }) {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem onClick={() => test.mutate(undefined)}><Zap /> Test connection</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setChangeModel(true)}><Boxes /> Change model</DropdownMenuItem>
           <DropdownMenuItem onClick={() => setRotate(true)}><KeySquare /> Replace key</DropdownMenuItem>
           <DropdownMenuItem onClick={() => toggle.mutate(undefined)}><Power /> {p.enabled ? "Disable" : "Enable"}</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem variant="destructive" onClick={() => remove.mutate(undefined)}><Trash2 /> Delete</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <ChangeModel p={p} open={changeModel} onOpenChange={setChangeModel} />
       <Dialog open={rotate} onOpenChange={setRotate}>
         <DialogContent>
           <form onSubmit={(e) => { e.preventDefault(); replace.mutate(undefined); }} className="space-y-4">

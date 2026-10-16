@@ -146,6 +146,7 @@ export interface Preset {
   key_url: string | null;
   auth_header: string;
   note: string | null;
+  free_tier: boolean;
 }
 
 export interface ProviderRow {
@@ -169,6 +170,8 @@ export interface TestResult {
   reply?: string;
   error?: string;
   models?: string[];
+  /** lightest model this key can use, from the live list */
+  recommended?: string | null;
 }
 
 export interface AliasRow {

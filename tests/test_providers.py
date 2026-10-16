@@ -382,3 +382,18 @@ async def test_gemini_test_connection_lists_the_keys_models(mock_http):
     assert await _live_models(cfg, "secret-key") == ["gemini-3.1-flash-lite"]  # chat models only
     assert requests[0].headers["x-goog-api-key"] == "secret-key" and "secret-key" not in str(requests[0].url)
     assert await _live_models(cfg, "") == []  # no key, no call
+
+
+def test_recommended_model_is_the_lightest_the_key_can_use():
+    from app.gateway.presets import PRESETS, recommended_model
+
+    live = ["gemini-2.5-pro-preview-tts", "gemini-3-pro-image", "gemini-3.1-flash-lite", "gemini-pro-latest"]
+    assert recommended_model(PRESETS["gemini"]["models"], live) == "gemini-3.1-flash-lite"
+    # the suggestion is gone (retired): fall back to a light-sounding chat model, never an image/tts one
+    assert recommended_model(["gemini-2.5-flash"], live) == "gemini-3.1-flash-lite"
+    assert recommended_model([], ["llama-3.3-70b", "llama-3.1-8b"]) == "llama-3.1-8b"
+    assert recommended_model([], ["gpt-image-1", "big-model"]) == "big-model"
+    assert recommended_model(["x"], []) is None
+    # every preset starts with its lightest model and marks free tiers
+    assert PRESETS["gemini"]["default_model"] == "gemini-3.1-flash-lite" and PRESETS["gemini"]["free_tier"]
+    assert PRESETS["xai"]["default_model"] == "grok-3-mini" and not PRESETS["openai"]["free_tier"]
