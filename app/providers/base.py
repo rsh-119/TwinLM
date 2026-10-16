@@ -47,6 +47,16 @@ class ProviderCredentialError(Exception):
     """The upstream rejected this gateway's credentials."""
 
 
+def connection_error(provider: str, exc: Exception) -> ProviderUnavailableError:
+    """A network failure as a readable reason. httpx timeouts have an empty
+    message, which made the console show just "connection error:"."""
+    if isinstance(exc, httpx.TimeoutException):
+        reason = f"timed out waiting for {provider} ({type(exc).__name__})"
+    else:
+        reason = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+    return ProviderUnavailableError(f"{provider} connection error: {reason}")
+
+
 def raise_for_unavailable(provider: str, status_code: int) -> None:
     """Shared status-code classification for HTTP adapters."""
     if status_code == 429:

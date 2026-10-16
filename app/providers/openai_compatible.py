@@ -7,6 +7,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 import httpx
 
 from app.providers.base import (
+    connection_error,
     EmbeddingResult,
     GenerationParams,
     GenerationResult,
@@ -109,7 +110,7 @@ class OpenAICompatibleProvider(PooledHTTPProvider):
                 headers=headers,
             )
         except _NETWORK_ERRORS as exc:
-            raise ProviderUnavailableError(f"{self.name} connection error: {exc}") from exc
+            raise connection_error(self.name, exc) from exc
 
         self._check_status(response.status_code, response.content)
         response.raise_for_status()
@@ -158,7 +159,7 @@ class OpenAICompatibleProvider(PooledHTTPProvider):
                     if text or usage or tool_calls or finish_reason:
                         yield StreamEvent(text, usage, tool_calls, finish_reason)
         except _NETWORK_ERRORS as exc:
-            raise ProviderUnavailableError(f"{self.name} connection error: {exc}") from exc
+            raise connection_error(self.name, exc) from exc
 
     async def embed(self, texts: List[str], model: str) -> EmbeddingResult:
         headers = self._headers()
@@ -169,7 +170,7 @@ class OpenAICompatibleProvider(PooledHTTPProvider):
                 headers=headers,
             )
         except _NETWORK_ERRORS as exc:
-            raise ProviderUnavailableError(f"{self.name} connection error: {exc}") from exc
+            raise connection_error(self.name, exc) from exc
 
         self._check_status(response.status_code, response.content)
         response.raise_for_status()

@@ -351,3 +351,34 @@ def test_provider_key_from_any_env_setting(monkeypatch):
     assert provider_api_key(settings, "deepseek_api_key") == "sk-deep"
     assert provider_api_key(settings, "missing_api_key") == ""
     assert provider_api_key(settings, None) == ""
+
+
+async def test_a_timeout_reads_as_a_reason_not_a_blank(monkeypatch):
+    """httpx timeouts have an empty message: the console showed only
+    "gemini connection error:"."""
+    from app.providers.base import ProviderUnavailableError
+
+    real_client = httpx.AsyncClient
+
+    def timeout(request):
+        raise httpx.ReadTimeout("", request=request)
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real_client(transport=httpx.MockTransport(timeout), **kw))
+    with pytest.raises(ProviderUnavailableError, match=r"timed out waiting for gemini \(ReadTimeout\)") as caught:
+        await GeminiProvider(api_key="k").generate([{"role": "user", "content": "q"}], "m")
+    assert "timed out" in str(caught.value)  # the router labels it a timeout
+
+
+async def test_gemini_test_connection_lists_the_keys_models(mock_http):
+    from app.api.admin_config import _live_models
+    from app.gateway.config import ProviderConfig
+
+    requests, responses = mock_http
+    responses["/models"] = httpx.Response(200, json={"models": [
+        {"name": "models/gemini-3.1-flash-lite", "supportedGenerationMethods": ["generateContent"]},
+        {"name": "models/gemini-embedding-001", "supportedGenerationMethods": ["embedContent"]},
+    ]})
+    cfg = ProviderConfig(type="gemini", default_model="gemini-3.1-flash-lite")
+    assert await _live_models(cfg, "secret-key") == ["gemini-3.1-flash-lite"]  # chat models only
+    assert requests[0].headers["x-goog-api-key"] == "secret-key" and "secret-key" not in str(requests[0].url)
+    assert await _live_models(cfg, "") == []  # no key, no call

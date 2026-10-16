@@ -44,7 +44,8 @@ PRESETS: Dict[str, Preset] = {
                ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"],
                ["chat", "tools"], "https://console.groq.com/keys"),
     "gemini": _p("Google Gemini", "gemini", None,
-                 ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-pro"],
+                 # "-latest" names follow Google's newest model; fixed ones retire
+                 ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-flash-lite-latest", "gemini-pro-latest"],
                  ["chat", "tools", "vision"], "https://aistudio.google.com/apikey"),
     "xai": _p("xAI (Grok)", "openai_compatible", "https://api.x.ai/v1",
               ["grok-4", "grok-3-mini"], ["chat", "tools", "vision"], "https://console.x.ai"),

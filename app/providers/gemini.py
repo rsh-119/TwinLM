@@ -7,6 +7,7 @@ import httpx
 
 from app.config import get_settings
 from app.providers.base import (
+    connection_error,
     EmbeddingResult,
     GenerationParams,
     GenerationResult,
@@ -85,7 +86,7 @@ class GeminiProvider(PooledHTTPProvider):
                 url, headers=self._headers(), json=self._build_payload(messages, params)
             )
         except _NETWORK_ERRORS as exc:
-            raise ProviderUnavailableError(f"gemini connection error: {exc}") from exc
+            raise connection_error("gemini", exc) from exc
 
         raise_for_unavailable(self.name, response.status_code)
         response.raise_for_status()
@@ -137,7 +138,7 @@ class GeminiProvider(PooledHTTPProvider):
                     if last or usage or calls or finish:
                         yield StreamEvent(last, usage, calls, finish)
         except _NETWORK_ERRORS as exc:
-            raise ProviderUnavailableError(f"gemini connection error: {exc}") from exc
+            raise connection_error("gemini", exc) from exc
 
     async def embed(self, texts: List[str], model: str) -> EmbeddingResult:
         """batchEmbedContents. Gemini doesn't report token usage for
@@ -155,7 +156,7 @@ class GeminiProvider(PooledHTTPProvider):
                 json=payload,
             )
         except _NETWORK_ERRORS as exc:
-            raise ProviderUnavailableError(f"gemini connection error: {exc}") from exc
+            raise connection_error("gemini", exc) from exc
 
         raise_for_unavailable(self.name, response.status_code)
         response.raise_for_status()

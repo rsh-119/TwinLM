@@ -11,3 +11,5 @@ data/
 .coverage
 htmlcov/
 backups/
+# design tool working files (impeccable)
+.impeccable/
