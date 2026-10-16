@@ -1,10 +1,10 @@
 {
  "schema": 1,
  "source": {
-  "revision": "a2a04efcc2a5390130c7a33ec2e1f0e9d1c7e7fa",
+  "revision": "7b72530dae298b62eb3db4339d5611b3e7f5c277",
   "working_tree_dirty": true,
-  "fingerprint": "ada85f58e33524be",
-  "updated_at": "2026-10-14T12:52:40Z"
+  "fingerprint": "fd30ae5721bcad1a",
+  "updated_at": "2026-10-16T17:20:50Z"
  },
  "annotations": [
   {
@@ -169,7 +169,7 @@
    "id": "app.gateway.rate_limit",
    "kind": "module",
    "path": "app/gateway/rate_limit.py",
-   "purpose": "In-process sliding-window RPM/TPM limiter"
+   "purpose": "RPM/TPM sliding windows (in-process, or Redis via app.gateway.shared)"
   },
   {
    "id": "app.gateway.health",
@@ -187,7 +187,25 @@
    "id": "app.gateway.cache",
    "kind": "module",
    "path": "app/gateway/cache.py",
-   "purpose": "In-process exact-match response cache"
+   "purpose": "Exact-match response cache (in-process LRU, or Redis via app.gateway.shared)"
+  },
+  {
+   "id": "app.gateway.budgets",
+   "kind": "module",
+   "path": "app/gateway/budgets.py",
+   "purpose": "Key/team/user/org budgets: worst-case reservations at admission, spend, 80%/100% alerts and webhook"
+  },
+  {
+   "id": "app.gateway.semantic_cache",
+   "kind": "module",
+   "path": "app/gateway/semantic_cache.py",
+   "purpose": "Opt-in semantic response cache: cosine match on the last user message within an exact-context scope"
+  },
+  {
+   "id": "app.gateway.shared",
+   "kind": "module",
+   "path": "app/gateway/shared.py",
+   "purpose": "Redis shared state for several instances: fail-fast client, rate limiter, response cache"
   },
   {
    "id": "app.gateway.guardrails",
@@ -728,6 +746,68 @@
    "purpose": "Output caps, cache eligibility and TTL, savings report math"
   },
   {
+   "id": "app.api.admin_config",
+   "kind": "module",
+   "path": "app/api/admin_config.py",
+   "purpose": "Admin API for providers, aliases and prices managed at runtime (validated, applied without restart)"
+  },
+  {
+   "id": "app.gateway.runtime",
+   "kind": "module",
+   "path": "app/gateway/runtime.py",
+   "purpose": "Merges gateway.toml with admin-panel config from the DB and hot-swaps router and services config"
+  },
+  {
+   "id": "app.gateway.secret_box",
+   "kind": "module",
+   "path": "app/gateway/secret_box.py",
+   "purpose": "Fernet encryption of provider API keys at rest (PROVIDER_KEYS_SECRET)"
+  },
+  {
+   "id": "app.gateway.presets",
+   "kind": "module",
+   "path": "app/gateway/presets.py",
+   "purpose": "Catalog of popular providers (endpoint, models, capabilities) for the admin panel"
+  },
+  {
+   "id": "tests.test_runtime_config",
+   "kind": "test",
+   "path": "tests/test_runtime_config.py",
+   "purpose": "Runtime providers/aliases/prices: no-restart apply, encrypted keys, validation"
+  },
+  {
+   "id": "app.console_auth",
+   "kind": "module",
+   "path": "app/console_auth.py",
+   "purpose": "Console users: scrypt passwords, hashed session tokens, roles, console_user dependency"
+  },
+  {
+   "id": "app.api.teams",
+   "kind": "module",
+   "path": "app/api/teams.py",
+   "purpose": "Sign-in, people, teams, members and team-scoped keys and usage"
+  },
+  {
+   "id": "tests.test_teams",
+   "kind": "test",
+   "path": "tests/test_teams.py",
+   "purpose": "Sign-in, roles, team scoping of members, keys and usage"
+  },
+  {
+   "id": "tests.test_console_web",
+   "kind": "test",
+   "path": "tests/test_console_web.py",
+   "purpose": "Cookie sessions, CSRF, first-run setup, session playground, daily usage"
+  },
+  {
+   "id": "route:DELETE /admin/budgets/{budget_id}",
+   "kind": "route",
+   "path": "app/api/admin.py",
+   "symbol": "delete_budget",
+   "purpose": "",
+   "auto": true
+  },
+  {
    "id": "route:DELETE /admin/cache",
    "kind": "route",
    "path": "app/api/admin.py",
@@ -736,10 +816,58 @@
    "auto": true
   },
   {
+   "id": "route:DELETE /admin/config/aliases/{alias}",
+   "kind": "route",
+   "path": "app/api/admin_config.py",
+   "symbol": "delete_alias",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:DELETE /admin/config/prices",
+   "kind": "route",
+   "path": "app/api/admin_config.py",
+   "symbol": "delete_price",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:DELETE /admin/config/providers/{name}",
+   "kind": "route",
+   "path": "app/api/admin_config.py",
+   "symbol": "delete_provider",
+   "purpose": "",
+   "auto": true
+  },
+  {
    "id": "route:DELETE /admin/keys/{key_id}",
    "kind": "route",
    "path": "app/api/admin.py",
    "symbol": "revoke_key",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:DELETE /admin/teams/{team_id}",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "delete_team",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:DELETE /console/teams/{team_id}/keys/{key_id}",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "revoke_team_key",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:DELETE /console/teams/{team_id}/members/{user_id}",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "remove_member",
    "purpose": "",
    "auto": true
   },
@@ -756,6 +884,54 @@
    "kind": "route",
    "path": "app/web/routes.py",
    "symbol": "home",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /admin/budget-alerts",
+   "kind": "route",
+   "path": "app/api/admin.py",
+   "symbol": "budget_alerts",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /admin/budgets",
+   "kind": "route",
+   "path": "app/api/admin.py",
+   "symbol": "list_budgets",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /admin/config/aliases",
+   "kind": "route",
+   "path": "app/api/admin_config.py",
+   "symbol": "list_aliases",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /admin/config/presets",
+   "kind": "route",
+   "path": "app/api/admin_config.py",
+   "symbol": "presets",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /admin/config/prices",
+   "kind": "route",
+   "path": "app/api/admin_config.py",
+   "symbol": "list_prices",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /admin/config/providers",
+   "kind": "route",
+   "path": "app/api/admin_config.py",
+   "symbol": "list_providers",
    "purpose": "",
    "auto": true
   },
@@ -796,6 +972,86 @@
    "kind": "route",
    "path": "app/api/admin.py",
    "symbol": "usage",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /admin/usage/daily",
+   "kind": "route",
+   "path": "app/api/admin.py",
+   "symbol": "usage_daily",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /admin/users",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "list_users",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /auth/me",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "me",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /auth/setup",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "setup_status",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /console/teams",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "my_teams",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /console/teams/{team_id}/budgets",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "team_budgets",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /console/teams/{team_id}/keys",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "team_keys",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /console/teams/{team_id}/members",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "team_members",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /console/teams/{team_id}/usage",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "team_usage",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:GET /console/teams/{team_id}/usage/daily",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "team_usage_daily",
    "purpose": "",
    "auto": true
   },
@@ -864,6 +1120,46 @@
    "auto": true
   },
   {
+   "id": "route:PATCH /admin/config/providers/{name}",
+   "kind": "route",
+   "path": "app/api/admin_config.py",
+   "symbol": "update_provider",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:PATCH /admin/users/{user_id}",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "update_user",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:PATCH /console/teams/{team_id}/members/{user_id}",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "change_member_role",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /admin/config/providers",
+   "kind": "route",
+   "path": "app/api/admin_config.py",
+   "symbol": "create_provider",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /admin/config/test",
+   "kind": "route",
+   "path": "app/api/admin_config.py",
+   "symbol": "test_provider",
+   "purpose": "",
+   "auto": true
+  },
+  {
    "id": "route:POST /admin/keys",
    "kind": "route",
    "path": "app/api/admin.py",
@@ -876,6 +1172,78 @@
    "kind": "route",
    "path": "app/api/admin.py",
    "symbol": "rotate_key",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /admin/teams",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "create_team",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /admin/users",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "create_user",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /auth/login",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "login",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /auth/logout",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "logout",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /auth/password",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "change_password",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /auth/setup",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "setup",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /console/teams/{team_id}/keys",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "create_team_key",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /console/teams/{team_id}/members",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "add_member",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:POST /console/teams/{team_id}/members/{user_id}/reset-password",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "reset_member_password",
    "purpose": "",
    "auto": true
   },
@@ -948,6 +1316,30 @@
    "kind": "route",
    "path": "app/api/memories.py",
    "symbol": "create_memory",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:PUT /admin/budgets",
+   "kind": "route",
+   "path": "app/api/admin.py",
+   "symbol": "set_budget",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:PUT /admin/config/aliases/{alias}",
+   "kind": "route",
+   "path": "app/api/admin_config.py",
+   "symbol": "set_alias",
+   "purpose": "",
+   "auto": true
+  },
+  {
+   "id": "route:PUT /admin/config/prices",
+   "kind": "route",
+   "path": "app/api/admin_config.py",
+   "symbol": "set_price",
    "purpose": "",
    "auto": true
   }
@@ -1577,6 +1969,65 @@
    "inferred": true
   },
   {
+   "from": "app.api.admin_config",
+   "to": "app.gateway.runtime",
+   "type": "calls"
+  },
+  {
+   "from": "app.api.admin_config",
+   "to": "app.gateway.secret_box",
+   "type": "calls"
+  },
+  {
+   "from": "app.gateway.runtime",
+   "to": "app.router.model_router",
+   "type": "calls",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_runtime_config",
+   "to": "app.api.admin_config",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_runtime_config",
+   "to": "app.gateway.runtime",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "app.api.teams",
+   "to": "app.console_auth",
+   "type": "calls",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_teams",
+   "to": "app.api.teams",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_teams",
+   "to": "app.console_auth",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "tests.test_console_web",
+   "to": "app.api.teams",
+   "type": "tests",
+   "inferred": true
+  },
+  {
+   "from": "route:DELETE /admin/budgets/{budget_id}",
+   "to": "app.api.admin",
+   "type": "routes_to",
+   "note": "delete_budget",
+   "auto": true
+  },
+  {
    "from": "route:DELETE /admin/cache",
    "to": "app.api.admin",
    "type": "routes_to",
@@ -1584,10 +2035,52 @@
    "auto": true
   },
   {
+   "from": "route:DELETE /admin/config/aliases/{alias}",
+   "to": "app.api.admin_config",
+   "type": "routes_to",
+   "note": "delete_alias",
+   "auto": true
+  },
+  {
+   "from": "route:DELETE /admin/config/prices",
+   "to": "app.api.admin_config",
+   "type": "routes_to",
+   "note": "delete_price",
+   "auto": true
+  },
+  {
+   "from": "route:DELETE /admin/config/providers/{name}",
+   "to": "app.api.admin_config",
+   "type": "routes_to",
+   "note": "delete_provider",
+   "auto": true
+  },
+  {
    "from": "route:DELETE /admin/keys/{key_id}",
    "to": "app.api.admin",
    "type": "routes_to",
    "note": "revoke_key",
+   "auto": true
+  },
+  {
+   "from": "route:DELETE /admin/teams/{team_id}",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "delete_team",
+   "auto": true
+  },
+  {
+   "from": "route:DELETE /console/teams/{team_id}/keys/{key_id}",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "revoke_team_key",
+   "auto": true
+  },
+  {
+   "from": "route:DELETE /console/teams/{team_id}/members/{user_id}",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "remove_member",
    "auto": true
   },
   {
@@ -1602,6 +2095,48 @@
    "to": "app.web.routes",
    "type": "routes_to",
    "note": "home",
+   "auto": true
+  },
+  {
+   "from": "route:GET /admin/budget-alerts",
+   "to": "app.api.admin",
+   "type": "routes_to",
+   "note": "budget_alerts",
+   "auto": true
+  },
+  {
+   "from": "route:GET /admin/budgets",
+   "to": "app.api.admin",
+   "type": "routes_to",
+   "note": "list_budgets",
+   "auto": true
+  },
+  {
+   "from": "route:GET /admin/config/aliases",
+   "to": "app.api.admin_config",
+   "type": "routes_to",
+   "note": "list_aliases",
+   "auto": true
+  },
+  {
+   "from": "route:GET /admin/config/presets",
+   "to": "app.api.admin_config",
+   "type": "routes_to",
+   "note": "presets",
+   "auto": true
+  },
+  {
+   "from": "route:GET /admin/config/prices",
+   "to": "app.api.admin_config",
+   "type": "routes_to",
+   "note": "list_prices",
+   "auto": true
+  },
+  {
+   "from": "route:GET /admin/config/providers",
+   "to": "app.api.admin_config",
+   "type": "routes_to",
+   "note": "list_providers",
    "auto": true
   },
   {
@@ -1637,6 +2172,76 @@
    "to": "app.api.admin",
    "type": "routes_to",
    "note": "usage",
+   "auto": true
+  },
+  {
+   "from": "route:GET /admin/usage/daily",
+   "to": "app.api.admin",
+   "type": "routes_to",
+   "note": "usage_daily",
+   "auto": true
+  },
+  {
+   "from": "route:GET /admin/users",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "list_users",
+   "auto": true
+  },
+  {
+   "from": "route:GET /auth/me",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "me",
+   "auto": true
+  },
+  {
+   "from": "route:GET /auth/setup",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "setup_status",
+   "auto": true
+  },
+  {
+   "from": "route:GET /console/teams",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "my_teams",
+   "auto": true
+  },
+  {
+   "from": "route:GET /console/teams/{team_id}/budgets",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "team_budgets",
+   "auto": true
+  },
+  {
+   "from": "route:GET /console/teams/{team_id}/keys",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "team_keys",
+   "auto": true
+  },
+  {
+   "from": "route:GET /console/teams/{team_id}/members",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "team_members",
+   "auto": true
+  },
+  {
+   "from": "route:GET /console/teams/{team_id}/usage",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "team_usage",
+   "auto": true
+  },
+  {
+   "from": "route:GET /console/teams/{team_id}/usage/daily",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "team_usage_daily",
    "auto": true
   },
   {
@@ -1696,6 +2301,41 @@
    "auto": true
   },
   {
+   "from": "route:PATCH /admin/config/providers/{name}",
+   "to": "app.api.admin_config",
+   "type": "routes_to",
+   "note": "update_provider",
+   "auto": true
+  },
+  {
+   "from": "route:PATCH /admin/users/{user_id}",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "update_user",
+   "auto": true
+  },
+  {
+   "from": "route:PATCH /console/teams/{team_id}/members/{user_id}",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "change_member_role",
+   "auto": true
+  },
+  {
+   "from": "route:POST /admin/config/providers",
+   "to": "app.api.admin_config",
+   "type": "routes_to",
+   "note": "create_provider",
+   "auto": true
+  },
+  {
+   "from": "route:POST /admin/config/test",
+   "to": "app.api.admin_config",
+   "type": "routes_to",
+   "note": "test_provider",
+   "auto": true
+  },
+  {
    "from": "route:POST /admin/keys",
    "to": "app.api.admin",
    "type": "routes_to",
@@ -1707,6 +2347,69 @@
    "to": "app.api.admin",
    "type": "routes_to",
    "note": "rotate_key",
+   "auto": true
+  },
+  {
+   "from": "route:POST /admin/teams",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "create_team",
+   "auto": true
+  },
+  {
+   "from": "route:POST /admin/users",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "create_user",
+   "auto": true
+  },
+  {
+   "from": "route:POST /auth/login",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "login",
+   "auto": true
+  },
+  {
+   "from": "route:POST /auth/logout",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "logout",
+   "auto": true
+  },
+  {
+   "from": "route:POST /auth/password",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "change_password",
+   "auto": true
+  },
+  {
+   "from": "route:POST /auth/setup",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "setup",
+   "auto": true
+  },
+  {
+   "from": "route:POST /console/teams/{team_id}/keys",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "create_team_key",
+   "auto": true
+  },
+  {
+   "from": "route:POST /console/teams/{team_id}/members",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "add_member",
+   "auto": true
+  },
+  {
+   "from": "route:POST /console/teams/{team_id}/members/{user_id}/reset-password",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "reset_member_password",
    "auto": true
   },
   {
@@ -1773,6 +2476,27 @@
    "auto": true
   },
   {
+   "from": "route:PUT /admin/budgets",
+   "to": "app.api.admin",
+   "type": "routes_to",
+   "note": "set_budget",
+   "auto": true
+  },
+  {
+   "from": "route:PUT /admin/config/aliases/{alias}",
+   "to": "app.api.admin_config",
+   "type": "routes_to",
+   "note": "set_alias",
+   "auto": true
+  },
+  {
+   "from": "route:PUT /admin/config/prices",
+   "to": "app.api.admin_config",
+   "type": "routes_to",
+   "note": "set_price",
+   "auto": true
+  },
+  {
    "from": "app.api.admin",
    "to": "app.api.common",
    "type": "imports",
@@ -1792,7 +2516,19 @@
   },
   {
    "from": "app.api.admin",
+   "to": "app.database.models",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin",
    "to": "app.database.repository",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin",
+   "to": "app.gateway.budgets",
    "type": "imports",
    "auto": true
   },
@@ -1810,6 +2546,66 @@
   },
   {
    "from": "app.api.admin",
+   "to": "app.router.model_router",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin_config",
+   "to": "app.api.common",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin_config",
+   "to": "app.auth",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin_config",
+   "to": "app.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin_config",
+   "to": "app.database.database",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin_config",
+   "to": "app.database.models",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin_config",
+   "to": "app.gateway.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin_config",
+   "to": "app.gateway.presets",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin_config",
+   "to": "app.gateway.runtime",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin_config",
+   "to": "app.gateway.secret_box",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin_config",
    "to": "app.router.model_router",
    "type": "imports",
    "auto": true
@@ -1847,6 +2643,12 @@
   {
    "from": "app.api.chat",
    "to": "app.database.repository",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.chat",
+   "to": "app.gateway.budgets",
    "type": "imports",
    "auto": true
   },
@@ -1918,7 +2720,7 @@
   },
   {
    "from": "app.api.common",
-   "to": "app.database.repository",
+   "to": "app.gateway.budgets",
    "type": "imports",
    "auto": true
   },
@@ -1943,6 +2745,18 @@
   {
    "from": "app.api.common",
    "to": "app.gateway.rate_limit",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.common",
+   "to": "app.gateway.semantic_cache",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.common",
+   "to": "app.gateway.shared",
    "type": "imports",
    "auto": true
   },
@@ -2175,8 +2989,68 @@
    "auto": true
   },
   {
+   "from": "app.api.teams",
+   "to": "app.api.common",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.teams",
+   "to": "app.auth",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.teams",
+   "to": "app.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.teams",
+   "to": "app.console_auth",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.teams",
+   "to": "app.database.database",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.teams",
+   "to": "app.database.models",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.teams",
+   "to": "app.database.repository",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.teams",
+   "to": "app.gateway.budgets",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.teams",
+   "to": "app.gateway.rate_limit",
+   "type": "imports",
+   "auto": true
+  },
+  {
    "from": "app.auth",
    "to": "app.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.auth",
+   "to": "app.console_auth",
    "type": "imports",
    "auto": true
   },
@@ -2195,6 +3069,24 @@
   {
    "from": "app.auth",
    "to": "app.database.repository",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.auth",
+   "to": "app.gateway.shared",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.console_auth",
+   "to": "app.database.database",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.console_auth",
+   "to": "app.database.models",
    "type": "imports",
    "auto": true
   },
@@ -2223,8 +3115,56 @@
    "auto": true
   },
   {
+   "from": "app.gateway.budgets",
+   "to": "app.auth",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.budgets",
+   "to": "app.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.budgets",
+   "to": "app.database.models",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.budgets",
+   "to": "app.database.repository",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.budgets",
+   "to": "app.gateway.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.budgets",
+   "to": "app.gateway.pricing",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.budgets",
+   "to": "app.observability",
+   "type": "imports",
+   "auto": true
+  },
+  {
    "from": "app.gateway.cache",
    "to": "app.gateway.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.cache",
+   "to": "app.gateway.shared",
    "type": "imports",
    "auto": true
   },
@@ -2261,6 +3201,78 @@
   {
    "from": "app.gateway.pricing",
    "to": "app.providers.base",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.rate_limit",
+   "to": "app.gateway.shared",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.runtime",
+   "to": "app.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.runtime",
+   "to": "app.database.models",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.runtime",
+   "to": "app.gateway.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.runtime",
+   "to": "app.gateway.secret_box",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.runtime",
+   "to": "app.gateway.shared",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.runtime",
+   "to": "app.router.model_router",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.secret_box",
+   "to": "app.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.shared",
+   "to": "app.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.shared",
+   "to": "app.gateway.cache",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.shared",
+   "to": "app.providers.base",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.shared",
+   "to": "app.router.model_router",
    "type": "imports",
    "auto": true
   },
@@ -2320,6 +3332,12 @@
   },
   {
    "from": "app.main",
+   "to": "app.api.admin_config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.main",
    "to": "app.api.chat",
    "type": "imports",
    "auto": true
@@ -2356,6 +3374,12 @@
   },
   {
    "from": "app.main",
+   "to": "app.api.teams",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.main",
    "to": "app.config",
    "type": "imports",
    "auto": true
@@ -2375,6 +3399,18 @@
   {
    "from": "app.main",
    "to": "app.gateway.guardrails",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.main",
+   "to": "app.gateway.runtime",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.main",
+   "to": "app.gateway.shared",
    "type": "imports",
    "auto": true
   },
@@ -2429,6 +3465,12 @@
   {
    "from": "app.ops",
    "to": "app.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.ops",
+   "to": "app.console_auth",
    "type": "imports",
    "auto": true
   },

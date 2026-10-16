@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     # (Compose: the generated secret), so every process - the server and
     # `python -m app.ops` - connects the same way.
     database_password_file: str = ""
+    # Encrypts provider API keys added from the admin panel (any random
+    # string; Compose generates one). Without it, the panel can only add
+    # keyless providers. Or a file holding it (PROVIDER_KEYS_SECRET_FILE).
+    provider_keys_secret: str = ""
+    provider_keys_secret_file: str = ""
     # false = refuse to start on an outdated schema instead of migrating it
     migrate_on_startup: bool = True
     # Persistent PostgreSQL connections. Too small a pool makes every
@@ -38,6 +43,13 @@ class Settings(BaseSettings):
     auth_cache_seconds: float = 30.0
     usage_spool_path: str = "./data/usage-spool.db"
     max_concurrent_requests: int = 100
+    # Budget alerts (80% / 100%) are POSTed here as JSON with a Slack-style
+    # `text` field; empty = alerts are only logged and shown in the console.
+    budget_alert_webhook_url: str = ""
+    # Shared state for running several gateway instances: rate limits,
+    # response cache, budget reservations, key revocation and admin-panel
+    # config changes. Empty = in-process (one instance).
+    redis_url: str = ""
 
     gateway_config_path: str = "gateway.toml"
 
@@ -60,7 +72,9 @@ class Settings(BaseSettings):
     log_format: str = "json"  # "json" or "text"
     log_level: str = "INFO"
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # extra="allow" keeps unknown .env entries (e.g. DEEPSEEK_API_KEY) for
+    # providers whose api_key_setting is not a field here
+    model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
 
 @lru_cache

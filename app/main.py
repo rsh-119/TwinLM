@@ -1,12 +1,16 @@
 """FastAPI application entrypoint for TwinLM."""
+import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
@@ -14,15 +18,17 @@ from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api import admin, chat, conversations, embeddings, memories, models
+from app.api import admin, admin_config, chat, conversations, embeddings, memories, models, teams
 from app.api.common import get_services
 from app.config import get_settings
-from app.database.database import get_db, init_db
+from app.database.database import SessionLocal, get_db, init_db
+from app.gateway import runtime
 from app.gateway.config import get_gateway_config
 from app.gateway.guardrails import get_guardrails
+from app.gateway.shared import get_redis
 from app.observability import RequestContextMiddleware, setup_logging
 from app.request_limits import BodyLimitMiddleware, ConcurrencyLimitMiddleware
-from app.router.model_router import get_model_router
+from app.router.model_router import get_model_router, reset_router
 from app.web import routes as web_routes
 
 settings = get_settings()
@@ -45,20 +51,40 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     applied = init_db(apply=settings.migrate_on_startup)
     if applied:
         logger.info("database migrations applied: %s", applied)
+    # providers, aliases and prices added from the admin panel
+    db = SessionLocal()
+    try:
+        runtime.reload(db, get_services())
+    except Exception:  # noqa: BLE001 - keep serving the gateway.toml config
+        logger.exception("admin-panel configuration could not be applied; using gateway.toml only")
+    finally:
+        db.close()
+    follower = None
+    redis = get_redis()
+    if redis is not None:
+        try:
+            redis.ping()
+        except Exception:  # noqa: BLE001 - shared state fails open; keep serving
+            logger.error("REDIS_URL is set but Redis is unreachable: limits and cache fail open until it is back")
+        follower = asyncio.create_task(runtime.follow(get_services(), SessionLocal))
     _app.state.ready = True
     logger.info(
-        "TwinLM started: auth_enabled=%s admin_api=%s web_ui=%s stateful=%s",
+        "TwinLM started: auth_enabled=%s admin_api=%s web_ui=%s stateful=%s shared_state=%s",
         settings.auth_enabled, bool(settings.admin_token), settings.web_ui_enabled, settings.stateful_enabled,
+        "redis" if redis is not None else "in-process",
     )
     try:
         yield
     finally:
         _app.state.ready = False
-        if get_model_router.cache_info().currsize:
-            await get_model_router().aclose()
+        if follower is not None:
+            follower.cancel()
+        old_router = reset_router()
+        if old_router is not None:
+            await old_router.aclose()
+        await runtime.close_retired()
         if get_services.cache_info().currsize and get_services().usage_writer:
             get_services().usage_writer.close()  # flush queued request logs
-        get_model_router.cache_clear()
         get_services.cache_clear()
 
 
@@ -121,6 +147,10 @@ if settings.stateful_enabled:
     app.include_router(conversations.router)
     app.include_router(memories.router)
 app.include_router(admin.router)
+app.include_router(admin_config.router)
+app.include_router(teams.auth_router)
+app.include_router(teams.admin_router)
+app.include_router(teams.console_router)
 if settings.web_ui_enabled and settings.stateful_enabled:
     app.include_router(web_routes.router)
 
@@ -150,3 +180,19 @@ def metrics() -> Response:
     """Prometheus scrape endpoint. Unauthenticated, like most exporters -
     keep it on an internal network."""
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+# The web console (console/, a static Next.js export) at /app. Mounted only
+# when it has been built, so tests and dev without Node still work.
+CONSOLE_DIR = Path(os.environ.get("CONSOLE_DIR", Path(__file__).resolve().parent.parent / "console" / "out"))
+if (CONSOLE_DIR / "index.html").is_file():
+    @app.get("/app", include_in_schema=False)
+    def console_root() -> RedirectResponse:
+        return RedirectResponse("/app/")
+
+    if not settings.web_ui_enabled:
+        @app.get("/", include_in_schema=False)
+        def home() -> RedirectResponse:
+            return RedirectResponse("/app/")
+
+    app.mount("/app", StaticFiles(directory=CONSOLE_DIR, html=True), name="console")

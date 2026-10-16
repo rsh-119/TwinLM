@@ -1,0 +1,179 @@
+export const metadata = { title: "Integrate your apps" };
+
+# Integrate your apps
+
+TwinLM speaks the OpenAI API. Any client that lets you set a **base URL** and an **API key** works without a
+TwinLM library: point it at `https://<your-gateway>/v1` and use a gateway key (`gw_live_…`) as the API key.
+
+The `model` you send is a name you control in [`gateway.toml`](/docs/config/): an alias like `auto`, `fast` or
+`smart`, or an exact `provider/model`. See [Routing](/docs/routing/#what-model-can-be).
+
+## OpenAI SDK (Python)
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="gw_live_...")
+
+reply = client.chat.completions.create(
+    model="auto",
+    messages=[{"role": "user", "content": "Summarise this ticket: ..."}],
+)
+print(reply.choices[0].message.content)
+print(reply.usage)          # tokens as reported by the provider
+```
+
+Already reading `OPENAI_API_KEY` and `OPENAI_BASE_URL` from the environment? Then you change no code at all:
+
+```bash
+export OPENAI_BASE_URL=http://localhost:8000/v1
+export OPENAI_API_KEY=gw_live_...
+```
+
+## OpenAI SDK (Node.js / TypeScript)
+
+```ts
+import OpenAI from "openai";
+
+const client = new OpenAI({ baseURL: "http://localhost:8000/v1", apiKey: "gw_live_..." });
+
+const reply = await client.chat.completions.create({
+  model: "auto",
+  messages: [{ role: "user", content: "Hello!" }],
+});
+console.log(reply.choices[0].message.content);
+```
+
+## LangChain
+
+```python
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+
+llm = ChatOpenAI(base_url="http://localhost:8000/v1", api_key="gw_live_...", model="auto")
+print(llm.invoke("Hello!").content)
+
+embeddings = OpenAIEmbeddings(base_url="http://localhost:8000/v1", api_key="gw_live_...", model="embed",
+                              check_embedding_ctx_length=False)
+```
+
+`check_embedding_ctx_length=False` makes LangChain send plain strings instead of token ids, which non-OpenAI
+embedding models need.
+
+## LlamaIndex
+
+```python
+from llama_index.llms.openai_like import OpenAILike
+
+llm = OpenAILike(api_base="http://localhost:8000/v1", api_key="gw_live_...", model="auto",
+                 is_chat_model=True)
+print(llm.complete("Hello!"))
+```
+
+## Vercel AI SDK
+
+```ts
+import { createOpenAI } from "@ai-sdk/openai";
+import { generateText } from "ai";
+
+const twinlm = createOpenAI({ baseURL: "http://localhost:8000/v1", apiKey: "gw_live_..." });
+const { text } = await generateText({ model: twinlm.chat("auto"), prompt: "Hello!" });
+```
+
+## cURL
+
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer gw_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"model": "auto", "messages": [{"role": "user", "content": "Hello!"}]}'
+```
+
+## Streaming
+
+```python
+stream = client.chat.completions.create(
+    model="auto",
+    messages=[{"role": "user", "content": "Write a haiku about invoices."}],
+    stream=True,
+    stream_options={"include_usage": True},   # last chunk carries token usage
+)
+for chunk in stream:
+    if chunk.choices and chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")
+```
+
+Fallback to another provider only happens **before the first token**. If a provider fails mid-stream, the
+stream ends with a short note instead of switching providers halfway through an answer. Streamed requests are
+never cached.
+
+## Tool calling
+
+`tools`, `tool_choice` and `parallel_tool_calls` work as in the OpenAI API. Requests with tools are only sent to
+deployments that have the `tools` capability.
+
+```python
+tools = [{
+    "type": "function",
+    "function": {
+        "name": "get_order_status",
+        "parameters": {"type": "object", "properties": {"order_id": {"type": "string"}}, "required": ["order_id"]},
+    },
+}]
+first = client.chat.completions.create(model="auto", messages=messages, tools=tools)
+call = first.choices[0].message.tool_calls[0]
+messages += [first.choices[0].message,
+             {"role": "tool", "tool_call_id": call.id, "content": '{"status": "shipped"}'}]
+final = client.chat.completions.create(model="auto", messages=messages, tools=tools)
+```
+
+Pass the assistant message object back as-is (as above): Gemini needs the extra data the gateway attaches to
+its tool calls.
+
+## Images (vision)
+
+Content-part lists with `image_url` work and are routed only to deployments with the `vision` capability.
+Gemini accepts images only as base64 `data:` URLs.
+
+```python
+import base64
+img = base64.b64encode(open("receipt.png", "rb").read()).decode()
+reply = client.chat.completions.create(model="auto", messages=[{"role": "user", "content": [
+    {"type": "text", "text": "What is the total on this receipt?"},
+    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img}"}},
+]}])
+```
+
+## Embeddings
+
+```python
+vectors = client.embeddings.create(model="embed", input=["first text", "second text"])
+print(len(vectors.data[0].embedding))
+```
+
+Only deployments with the `embeddings` capability serve these. `dimensions` is not supported.
+
+## Structured output
+
+`response_format` with `json_object` or `json_schema` is **validated by the gateway**, with a bounded repair
+attempt if the model returns invalid JSON. See [Structured output](/docs/guardrails/#structured-output).
+
+## What changes for your app
+
+- Responses have every OpenAI field, plus `provider` (which provider answered), and the `X-Request-ID` and
+  `X-Cache: HIT|MISS` headers.
+- **Unsupported parameters fail loudly** with a 400 `unsupported_parameter` error naming the field, instead of
+  being silently ignored. Check the [compatibility matrix](/docs/compatibility/) once.
+- Errors use OpenAI's error shape, so SDK exceptions show the real reason.
+- Requests without `max_tokens` get the configured [output cap](/docs/output-caps/).
+
+## Giving each app its own key
+
+Create one key per application or team so usage and cost are attributed and limits apply separately:
+
+```bash
+curl -X POST http://localhost:8000/admin/keys -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "support-bot", "project": "support", "allowed_models": ["fast"], "rpm_limit": 120, "daily_budget_usd": 20}'
+```
+
+See [Keys, limits and budgets](/docs/keys/).

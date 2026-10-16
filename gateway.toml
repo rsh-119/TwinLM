@@ -67,8 +67,8 @@ capabilities = ["embeddings"]
 # ("gemini") or "provider/model" can also be passed directly, which pins
 # that deployment with no fallback.
 [models.auto]
-targets = ["gemini", "groq"]
-description = "Default: Gemini, falling back to Groq"
+targets = ["groq", "gemini"]
+description = "Default: cheapest first (Groq), falling back to Gemini; image requests go to Gemini"
 
 [models.smart]
 targets = ["gemini/gemini-flash-latest", "groq/openai/gpt-oss-20b"]
@@ -111,6 +111,15 @@ baseline = "openai/gpt-4o"
 enabled = true                        # exact match; only stateless, non-streaming, temperature unset/0, no tools/sensitive data
 ttl_seconds = 300
 max_entries = 1000
+
+# Semantic cache: also reuse an answer when the last user message is worded
+# differently but means the same ("opening hours?" ~ "when are you open?").
+# Opt-in per alias - use it for FAQ/support bots, not for code or analysis.
+# Each cache miss on these aliases costs one embeddings call.
+# [cache.semantic]
+# models = ["faq"]                    # aliases that may use it
+# embedding_model = "embed"
+# min_similarity = 0.95               # lower = more hits, more wrong answers
 
 [guardrails]
 max_input_chars = 200000

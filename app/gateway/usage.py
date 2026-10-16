@@ -16,7 +16,7 @@ import tempfile
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import DataError, IntegrityError
@@ -57,6 +57,8 @@ class UsageRecord:
     ttft: Optional[float] = None
     started: float = field(default_factory=time.monotonic)
     finished: bool = False
+    # in-flight budget reservation (app.gateway.budgets), released by finish
+    reservation: Any = None
 
     def __post_init__(self) -> None:
         ACTIVE_REQUESTS.inc()
@@ -85,6 +87,21 @@ def finish(
     if record.finished:
         return
     record.finished = True
+    try:
+        _finish(db, record, pricing, limiter, writer)
+    finally:
+        # after the row is queued, so pending/settled spend now covers it
+        if record.reservation is not None:
+            record.reservation.release()
+
+
+def _finish(
+    db: Session,
+    record: UsageRecord,
+    pricing: Dict[str, PriceConfig],
+    limiter: SlidingWindowLimiter,
+    writer: Optional["UsageWriter"],
+) -> None:
     ACTIVE_REQUESTS.dec()
 
     latency = time.monotonic() - record.started
@@ -127,6 +144,7 @@ def finish(
         endpoint=record.endpoint,
         api_key_id=principal.key_id if principal else None,
         project=principal.project if principal else None,
+        user_id=principal.user_id if principal else None,
         conversation_id=record.conversation_id,
         requested_model=record.requested_model,
         provider=provider,
@@ -222,12 +240,19 @@ class UsageWriter:
             logger.exception("failed to spool usage row id=%s", row.get("id"))
             return False
 
-    def pending_cost_since(self, api_key_id: str, since: datetime) -> float:
+    def pending_cost_since(
+        self, since: datetime, api_key_id: Optional[str] = None,
+        project: Optional[str] = None, user_id: Optional[str] = None,
+    ) -> float:
+        """Known cost of rows not yet in the database; no filter = all."""
+        sql, args = "SELECT COALESCE(SUM(cost_usd), 0) FROM pending WHERE created_at >= ?", [since.isoformat()]
+        for column, value in (("api_key_id", api_key_id), ("json_extract(payload, '$.project')", project),
+                              ("json_extract(payload, '$.user_id')", user_id)):
+            if value is not None:
+                sql += f" AND {column} = ?"
+                args.append(value)
         with self._lock:
-            return self._conn.execute(
-                "SELECT COALESCE(SUM(cost_usd), 0) FROM pending WHERE api_key_id = ? AND created_at >= ?",
-                (api_key_id, since.isoformat()),
-            ).fetchone()[0]
+            return self._conn.execute(sql, args).fetchone()[0]
 
     def flush(self, timeout: float = 10.0) -> bool:
         """Wait for the outbox to drain; return False if DB remains unavailable."""

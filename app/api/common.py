@@ -3,8 +3,7 @@ gateway services (DI), admission control, and provider-error mapping."""
 import logging
 import math
 from contextlib import contextmanager
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Iterator, Optional
 
@@ -12,10 +11,12 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.auth import Principal
-from app.database import repository
+from app.gateway.budgets import BudgetExceeded, BudgetTracker, RedisReservations
 from app.gateway.cache import ResponseCache, get_response_cache
 from app.gateway.config import GatewayConfig, get_gateway_config
 from app.gateway.guardrails import GuardrailEngine, get_guardrails
+from app.gateway.semantic_cache import SemanticCache
+from app.gateway.shared import get_redis
 from app.gateway.rate_limit import SlidingWindowLimiter, get_rate_limiter
 from app.database.database import SessionLocal
 from app.gateway.usage import UsageRecord, UsageWriter
@@ -27,24 +28,38 @@ from app.router.model_router import NoProviderAvailableError
 logger = logging.getLogger("twinlm.api")
 
 
-@dataclass(frozen=True)
+# Not frozen: app.gateway.runtime replaces `config` when providers, aliases
+# or prices change in the admin panel.
+@dataclass
 class GatewayServices:
     config: GatewayConfig
-    limiter: SlidingWindowLimiter
-    cache: ResponseCache
+    limiter: SlidingWindowLimiter  # or shared.RedisLimiter
+    cache: ResponseCache  # or shared.RedisResponseCache
     guardrails: GuardrailEngine
     # None = write request logs synchronously on the request's session
     usage_writer: Optional[UsageWriter] = None
+    budgets: BudgetTracker = field(default_factory=BudgetTracker)
+    semantic_cache: Optional[SemanticCache] = None
+
+
+def semantic_cache_for(config: GatewayConfig) -> Optional[SemanticCache]:
+    semantic = config.cache.semantic
+    if not (config.cache.enabled and semantic.models):
+        return None
+    return SemanticCache(semantic.min_similarity, semantic.max_entries, config.cache.ttl_seconds)
 
 
 @lru_cache
 def get_services() -> GatewayServices:
+    config = get_gateway_config()
     return GatewayServices(
-        config=get_gateway_config(),
+        config=config,
         limiter=get_rate_limiter(),
         cache=get_response_cache(),
         guardrails=get_guardrails(),
         usage_writer=UsageWriter(SessionLocal, spool_path=get_settings().usage_spool_path),
+        semantic_cache=semantic_cache_for(config),
+        budgets=BudgetTracker(RedisReservations(get_redis()) if get_redis() is not None else None),
     )
 
 
@@ -54,9 +69,12 @@ def admit(
     services: GatewayServices,
     db: Session,
     record: UsageRecord,
+    estimate: float = 0.0,
 ) -> None:
-    """Model allow-list, rate limits and daily budget for the calling key.
-    No principal (auth disabled) means no per-key limits."""
+    """Model allow-list, rate limits and budgets (key, team, user, org) for
+    the caller; `estimate` is the request's worst-case cost, reserved
+    against the budgets until `finish`. No principal (auth disabled) means
+    no limits."""
     if principal is None:
         return
     if not principal.may_use(model):
@@ -79,14 +97,12 @@ def admit(
             headers={"Retry-After": str(max(1, math.ceil(retry_after)))},
         )
 
-    if principal.daily_budget_usd is not None:
-        midnight = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-        settled = repository.sum_cost_since(db, principal.key_id, midnight)
-        pending = services.usage_writer.pending_cost_since(principal.key_id, midnight) if services.usage_writer else 0.0
-        if settled + pending >= principal.daily_budget_usd:
-            RATE_LIMITED.labels("daily_budget").inc()
-            record.fail(429, "daily budget exceeded", "rate_limited")
-            raise HTTPException(status_code=429, detail="daily budget exceeded for this API key")
+    try:
+        record.reservation = services.budgets.admit(db, principal, estimate, services.usage_writer)
+    except BudgetExceeded as exc:
+        RATE_LIMITED.labels("budget").inc()
+        record.fail(429, str(exc), "rate_limited")
+        raise HTTPException(status_code=429, detail=str(exc))
 
 
 def unavailable_detail(exc: Exception) -> str:

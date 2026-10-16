@@ -1,0 +1,126 @@
+export const metadata = { title: "Admin API" };
+
+# Admin API
+
+The admin API manages keys and reports usage. Every call needs `Authorization: Bearer $ADMIN_TOKEN`. It is
+disabled when `ADMIN_TOKEN` is empty. Behind the TLS ingress, `/admin` is never exposed publicly: reach it from the
+host, an SSH tunnel or the test console.
+
+| Method and path | Purpose |
+| --- | --- |
+| `POST /admin/keys` | Create a key (raw key returned once) |
+| `GET /admin/keys` | List keys (no raw keys) |
+| `POST /admin/keys/{id}/rotate` | Issue a replacement with the same settings |
+| `DELETE /admin/keys/{id}` | Revoke a key |
+| `GET /admin/usage` | Requests, errors, tokens, cost and latency, grouped |
+| `GET /admin/savings` | Actual cost vs. a baseline model |
+| `GET /admin/providers` | Provider health and circuit-breaker state |
+| `GET /admin/models` | Aliases, groups, deployments, capabilities and prices |
+| `DELETE /admin/cache` | Clear the response cache |
+| `/admin/config/…` | Providers, models and prices managed at runtime ([below](#runtime-configuration)) |
+
+## POST /admin/keys
+
+```bash
+curl -X POST http://localhost:8000/admin/keys -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "support-bot", "project": "support", "allowed_models": ["fast"], "rpm_limit": 120, "tpm_limit": 200000, "daily_budget_usd": 20}'
+```
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `name` | string, 1–100 | required |
+| `project` | string, 1–100 | required; `default` is reserved |
+| `allowed_models` | list of strings | omitted = every model |
+| `rpm_limit`, `tpm_limit` | integer > 0 | omitted = `[rate_limits]` defaults |
+| `daily_budget_usd` | number ≥ 0 | advisory |
+| `user_id` | string, 1–128 | makes the key user-bound |
+
+Response (201):
+
+```json
+{
+  "id": "key_…",
+  "name": "support-bot",
+  "project": "support",
+  "key_prefix": "gw_live_AbCdEf",
+  "allowed_models": ["fast"],
+  "rpm_limit": 120,
+  "tpm_limit": 200000,
+  "daily_budget_usd": 20.0,
+  "user_id": null,
+  "created_at": "2026-10-14T09:00:00",
+  "revoked_at": null,
+  "key": "gw_live_…"
+}
+```
+
+`key` appears only in this response. `GET /admin/keys` returns the same objects without it.
+
+## POST /admin/keys/\{id\}/rotate
+
+Creates a new key with the same name, project, user, limits and budget, and returns it with `"replaces": "<old id>"`.
+The old key keeps working until revoked; pass `?revoke_old=true` to revoke it in the same call. 404 if the key
+doesn't exist or is already revoked.
+
+## DELETE /admin/keys/\{id\}
+
+Revokes the key immediately and returns it with `revoked_at` set. 404 if unknown.
+
+## GET /admin/usage
+
+| Query | Default | Values |
+| --- | --- | --- |
+| `hours` | `24` | up to `2160` |
+| `group_by` | `provider` | `provider`, `model`, `deployment`, `project`, `api_key_id` |
+
+Returns `since`, `group_by`, a `total` and `groups`. Fields: [Usage report](/docs/usage-and-savings/#usage-report).
+
+## GET /admin/savings
+
+| Query | Default | Values |
+| --- | --- | --- |
+| `hours` | `720` | up to `8784` |
+| `group_by` | `project` | `project`, `api_key_id`, `provider`, `deployment` |
+
+404 when no `[savings] baseline` is configured. Fields: [Savings report](/docs/usage-and-savings/#savings-report).
+
+## GET /admin/providers
+
+Health per provider: circuit state (`closed`, `open`, `half_open`), recent error rate and latency, and requests in
+flight. Use it to see why traffic is going to a fallback.
+
+## GET /admin/models
+
+The routing table as the gateway built it: aliases with their groups and deployments, each deployment's
+capabilities, and configured prices.
+
+## DELETE /admin/cache
+
+Empties the response cache. Returns `{"cleared": <entries removed>}`.
+
+## Runtime configuration
+
+What the console's Providers and Models tabs use. Every write is validated as a whole configuration before it is
+stored (an invalid result returns 400 and changes nothing) and takes effect immediately, without a restart.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /admin/config/presets` | Catalog of popular providers with endpoint, models and capabilities |
+| `GET /admin/config/providers` | Every provider with its source (`gateway.toml` or `panel`), default model, key hint, enabled flag and health |
+| `POST /admin/config/providers` | Add: `{"name", "preset", "api_key", "default_model"?, "base_url"?, "capabilities"?, "enabled"?}` |
+| `PATCH /admin/config/providers/{name}` | Change fields, rotate `api_key`, or set `enabled` (console providers only) |
+| `DELETE /admin/config/providers/{name}` | Delete; 409 lists the models that still use it |
+| `POST /admin/config/test` | One 1-token request with `{"preset", "api_key", "model"}` or `{"name"}`; returns `ok`, `latency_ms` or `error`. Stores nothing |
+| `GET /admin/config/aliases` | Effective models with their source |
+| `PUT /admin/config/aliases/{alias}` | Set `{"targets": [...], "max_output_tokens"?, "cache_ttl_seconds"?}`; order = fallback order |
+| `DELETE /admin/config/aliases/{alias}` | Remove a console model (the gateway.toml one, if any, comes back) |
+| `GET /admin/config/prices`, `PUT /admin/config/prices`, `DELETE /admin/config/prices?key=` | Prices per `provider/model` |
+
+```bash
+curl -X POST http://localhost:8000/admin/config/providers -H "Authorization: Bearer $ADMIN_TOKEN"   -H "Content-Type: application/json"   -d '{"name": "mistral", "preset": "mistral", "api_key": "…", "default_model": "mistral-small-latest"}'
+
+curl -X PUT http://localhost:8000/admin/config/aliases/smart -H "Authorization: Bearer $ADMIN_TOKEN"   -H "Content-Type: application/json"   -d '{"targets": ["mistral/mistral-small-latest", "gemini"]}'
+```
+
+API keys are never returned by any endpoint; only `key_hint` (the last four characters) is.

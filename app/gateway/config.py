@@ -39,6 +39,9 @@ class ProviderConfig(_Strict):
     base_url: Optional[str] = None
     api_key_setting: Optional[str] = None  # name of a `Settings` field
     timeout_seconds: float = Field(default=30.0, gt=0)
+    # openai_compatible: how the key is sent - "authorization" (Bearer) or
+    # "api-key" (Azure OpenAI)
+    auth_header: Literal["authorization", "api-key"] = "authorization"
     # None = the adapter type's defaults (see DEFAULT_CAPABILITIES)
     capabilities: Optional[List[Capability]] = None
     # mock only
@@ -94,6 +97,19 @@ class RateLimitConfig(_Strict):
     default_tpm: Optional[int] = Field(default=None, gt=0)
 
 
+class SemanticCacheConfig(_Strict):
+    # Aliases whose answers may be reused for a *differently worded* prompt
+    # with the same meaning (e.g. an FAQ bot). Only the last user message
+    # may differ; everything before it must match exactly. Each eligible
+    # cache miss costs one embeddings call. Empty = off.
+    models: List[str] = []
+    embedding_model: str = "embed"  # alias or deployment with `embeddings`
+    # cosine similarity needed for a hit; lower = more hits and more wrong
+    # answers ("capital of France" vs "capital of Germany" score ~0.9)
+    min_similarity: float = Field(default=0.95, gt=0, le=1)
+    max_entries: int = Field(default=1000, gt=0)
+
+
 class CacheConfig(_Strict):
     # Exact-match; only stateless, non-streaming, deterministic requests
     # (temperature unset or 0) without tool calls or sensitive content.
@@ -101,6 +117,7 @@ class CacheConfig(_Strict):
     ttl_seconds: float = Field(default=300.0, gt=0)
     max_entries: int = Field(default=1000, gt=0)
     max_bytes: int = Field(default=16_777_216, gt=0)
+    semantic: SemanticCacheConfig = SemanticCacheConfig()
 
 
 class GuardrailsConfig(_Strict):

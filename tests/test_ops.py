@@ -64,12 +64,13 @@ def test_upgrade_from_v1_preserves_data_and_is_repeatable(kind, tmp_path, monkey
 
         with pytest.raises(RuntimeError, match="python -m app.ops migrate"):
             database.init_db(apply=False)  # MIGRATE_ON_STARTUP=false refuses an old schema
-        assert database.init_db() == [2]
+        assert database.init_db() == [2, 3, 4, 5]
         assert database.init_db() == []
         database.init_db(apply=False)
 
         columns = lambda table: {c["name"] for c in inspect(engine).get_columns(table)}  # noqa: E731
         assert "user_id" in columns("api_keys") and "deployment" in columns("request_logs")
+        assert {"provider_configs", "alias_overrides", "price_overrides"} <= set(inspect(engine).get_table_names())
         with engine.connect() as conn:
             assert conn.execute(text("SELECT project FROM api_keys WHERE id = 'key_1'")).scalar() == "acme"
             assert conn.execute(text("SELECT COUNT(*) FROM request_logs")).scalar() == 1
@@ -80,7 +81,7 @@ def test_upgrade_from_v1_preserves_data_and_is_repeatable(kind, tmp_path, monkey
 def test_fresh_install_and_newer_schema_refusal(kind, tmp_path, monkeypatch):
     with _engine(kind, tmp_path) as engine:
         monkeypatch.setattr(database, "engine", engine)
-        assert database.init_db() == [1, 2]
+        assert database.init_db() == [1, 2, 3, 4, 5]
         with engine.begin() as conn:
             conn.execute(text("INSERT INTO schema_migrations (version) VALUES (999)"))
         with pytest.raises(RuntimeError, match="newer than this gateway"):
@@ -135,3 +136,9 @@ def test_outbox_reconcile_and_requeue(sqlite_engine, tmp_path, settings, monkeyp
         assert {r.id for r in session.query(models.RequestLog)} == {"req_dup", "req_lost"}
     assert ops.main(["outbox", "status"]) == 0
     assert json.loads(capsys.readouterr().out.strip().splitlines()[-1]) == {"pending": 0, "deadletter": 0}
+
+
+@pytest.mark.parametrize("url", ["postgres://u:p@h/db", "postgresql://u:p@h/db"])
+def test_hosted_postgres_urls_use_psycopg(url, monkeypatch):
+    monkeypatch.setattr(database.settings, "database_url", url)
+    assert database._database_url().drivername == "postgresql+psycopg"

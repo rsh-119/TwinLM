@@ -7,18 +7,19 @@ cheapest model that is good enough, answers repeated requests from cache,
 caps runaway outputs, and fails over when a provider is down.
 
 **Core** (kept small and well tested): OpenAI-compatible API · one key per
-app/team with limits · usage and cost per key/project/model · aliases with
-cheap-first routing and fallback · exact-match cache · output-token caps ·
-savings report against a baseline model.
+app/team with limits · budgets per company, team and person with alerts ·
+usage and cost per key/project/model · aliases with cheap-first routing and
+fallback · exact-match and semantic cache · output-token caps · savings
+report against a baseline model.
 **Optional** (works, not the focus): gateway-owned conversations and
 memories, guardrails, structured-output repair, web UI and test console.
 Providers: one OpenAI-compatible adapter (OpenAI, Groq, DeepSeek, Together,
 Mistral, Ollama, vLLM, ...) plus Gemini.
 
-The daily budget is an advisory admission limit, not a guaranteed spending
-ceiling. It includes settled and locally queued usage, but simultaneous
-in-flight requests, unknown usage/prices and provider billing differences can
-exceed the configured amount. Verify prices before using cost reports.
+Budgets refuse a request whose worst-case cost would cross the limit, so
+they hold as long as output is capped and prices are known; unpriced models
+and provider billing differences can still go over. Verify prices before
+relying on cost reports or budgets.
 
 It started from a single principle that still sets it apart: **the gateway
 can own the conversation, not the provider.** In stateful mode the client
@@ -39,8 +40,24 @@ of being silently ignored.
 **1. Run the gateway**
 
 ```bash
-docker run -d --name twinlm -p 8000:8000   -e GEMINI_API_KEY=... -e GROQ_API_KEY=...   -e ADMIN_TOKEN=$(openssl rand -hex 32)   -v twinlm-data:/app/data   ghcr.io/rsh-119/twinlm:latest
+export ADMIN_TOKEN=$(openssl rand -hex 32)   # keep it: needed for /admin
+docker run -d --name twinlm -p 8000:8000 -e GEMINI_API_KEY=... -e GROQ_API_KEY=... -e ADMIN_TOKEN -v twinlm-data:/app/data ghcr.io/rsh-119/twinlm:latest
 ```
+
+Gateway + PostgreSQL without cloning the repo:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/rsh-119/TwinLM/main/deploy/quickstart.yml
+echo "GEMINI_API_KEY=..." >> .env && echo "GROQ_API_KEY=..." >> .env
+docker compose -f quickstart.yml up -d
+docker compose -f quickstart.yml exec gateway cat /run/secrets/admin_token
+```
+
+Or one click on Render (`render.yaml`: image + managed PostgreSQL):
+[Deploy to Render](https://render.com/deploy?repo=https://github.com/rsh-119/TwinLM).
+Documentation: https://rsh-119.github.io/TwinLM/docs/ (quickstart, config reference, API, operations).
+Product site: https://rsh-119.github.io/TwinLM/ (Next.js in `site/`: `cd site && npm install && npm run dev`;
+published by `.github/workflows/pages.yml`).
 
 SQLite in the `twinlm-data` volume by default; pass
 `-e DATABASE_URL=postgresql+psycopg://user:pass@host/db` for Postgres. To
@@ -71,6 +88,14 @@ const client = new OpenAI({ baseURL: "http://localhost:8000/v1", apiKey: "gw_liv
 const reply = await client.chat.completions.create({ model: "auto", messages: [{ role: "user", content: "Hi" }] });
 ```
 
+**Teams and members.** People sign in to the console with email and password; admins, team admins and
+members get keys and spend per team (`docs` → Teams and members). First admin: `python -m app.ops create-admin`.
+
+**Add providers without a restart.** In the web console (http://localhost:8000/app) the
+Providers tab adds Anthropic, OpenAI, Mistral, DeepSeek and other providers with just an API key (stored
+encrypted with `PROVIDER_KEYS_SECRET`), and the Models tab puts them into aliases and sets prices. Changes
+apply immediately.
+
 LangChain, LlamaIndex and other OpenAI-compatible frameworks work the same
 way: set their base URL and API key. `model` is an alias from
 `gateway.toml` (`auto`, `smart`, `fast`), a provider (`gemini`) or
@@ -83,10 +108,10 @@ way: set their base URL and API key. `model` is an alias from
 [Supported providers](#supported-providers) · [Configuration](#configuration) ·
 [API usage](#api-usage) · [Authentication](#authentication) ·
 [Routing](#routing) · [Fallbacks, retries and circuit breakers](#fallbacks-retries-and-circuit-breakers) ·
-[Rate limiting](#rate-limiting) · [Caching](#caching) ·
+[Rate limiting](#rate-limiting) · [Budgets and alerts](#budgets-and-alerts) · [Caching](#caching) ·
 [Cost tracking](#usage-and-cost-tracking) · [Guardrails and structured output](#guardrails-and-structured-output) ·
-[Observability](#observability) · [Docker](#docker) · [Testing](#testing) ·
-[Example client](#example-client) · [Test console](#test-console-streamlit) · [Limitations](#limitations)
+[Observability](#observability) · [Docker](#docker) · [Several instances](#running-several-instances) · [Testing](#testing) ·
+[Example client](#example-client) · [Web console](#web-console) · [Limitations](#limitations)
 
 ## Architecture
 
@@ -312,11 +337,38 @@ Per API key, sliding 60-second windows: **requests/minute** and
 **tokens/minute** (tokens are counted when the provider reports them, so
 one request can overshoot before the next is rejected). Exceeding a
 window returns 429 with `Retry-After`. Keys without their own limits use
-`[rate_limits]` defaults from `gateway.toml`. The advisory **daily budget**
-check compares today's (UTC) settled and locally queued spend with
-`daily_budget_usd`. In-flight and unknown-cost usage can still exceed it.
+`[rate_limits]` defaults from `gateway.toml`.
 
-Limits are kept in-process, so they apply per gateway instance.
+Limits are kept in-process, so they apply per gateway instance, unless
+`REDIS_URL` is set ([several instances](#running-several-instances)).
+
+## Budgets and alerts
+
+Spending limits in USD, checked before every request:
+
+| Budget | Set with | Period |
+|---|---|---|
+| Per API key | `daily_budget_usd` on the key | day (UTC) |
+| Per team (project) | `PUT /admin/budgets {"scope": "team", "target": "search", "limit_usd": 500}` | `daily` or `monthly` |
+| Per person | `{"scope": "user", "target": "<user id>", ...}`: their personal keys and playground use | `daily` or `monthly` |
+| Whole company | `{"scope": "org", "limit_usd": 2000}` | `daily` or `monthly` |
+
+Or in the console: **Budgets** (admins). A request is refused with 429
+(`team 'search' monthly budget exceeded`) when settled spend, spend still
+being written, requests in flight and **this request's worst case** would
+cross any budget that applies. The worst case is the input (≈ characters/3
+tokens) plus the output cap (`max_tokens` or `default_max_output_tokens`), at
+the priciest model the alias may fall back to. It is reserved while the
+request runs and replaced by the real cost when it ends, so concurrent
+requests can't overshoot together. Without an output cap only the input is
+reserved; unpriced models reserve nothing and stop only the next request.
+
+**Alerts** fire once per budget period at 80% and at 100% (also on the first
+refused request): a log line, the `llm_budget_alerts_total` metric, the
+console's alert list (`GET /admin/budget-alerts`) and, with
+`BUDGET_ALERT_WEBHOOK_URL`, a JSON POST with a Slack-style `text` field.
+`GET /admin/budgets` shows each budget's spend this period; team members see
+their team's and their own budget on the team page.
 
 ## Caching
 
@@ -330,7 +382,23 @@ never cross projects. Requests where the guardrails detect secrets or PII
 are never cached. Generated sensitive output and tool-call turns are also
 excluded. Responses carry `X-Cache: HIT|MISS`, hits are logged at zero cost,
 and `DELETE /admin/cache` clears it. LRU with TTL and a byte cap, in-process.
-There is no semantic cache.
+**Semantic cache** (opt-in per alias). An FAQ or support bot gets the same
+question in many wordings. With
+
+```toml
+[cache.semantic]
+models = ["faq"]           # aliases that may use it
+embedding_model = "embed"  # an alias with embeddings
+min_similarity = 0.95
+```
+
+a request to `faq` that misses the exact cache embeds its last user message
+and reuses a cached answer whose question has cosine similarity ≥ 0.95, with
+everything before that message (system prompt, history, params, project)
+identical. Hits carry `X-Cache: HIT` and `X-Cache-Similarity`. Each miss costs
+one embeddings call, logged as its own request. Similar is not identical
+("capital of France?" vs "capital of Germany?" score about 0.9), so keep it to
+aliases where a near-match answer is acceptable. In-process, per instance.
 
 ## Usage and cost tracking
 
@@ -405,11 +473,12 @@ to `max_repair_attempts` times; if the reply is still invalid it returns
   `llm_retries_total`, `llm_cache_hits_total`, `llm_cache_misses_total`,
   `llm_provider_health`, `llm_active_requests`,
   `llm_guardrail_violations_total`,
-  `llm_structured_output_failures_total`, `llm_rate_limited_total`.
+  `llm_structured_output_failures_total`, `llm_rate_limited_total`,
+  `llm_budget_alerts_total`.
 - **Grafana**: the "TwinLM Gateway" dashboard is provisioned by compose.
 - **Admin API** (`Authorization: Bearer $ADMIN_TOKEN`; disabled when
   unset): `/admin/providers`, `/admin/models`, `/admin/usage`,
-  `/admin/keys`, `/admin/cache`.
+  `/admin/keys`, `/admin/cache`, `/admin/budgets`, `/admin/budget-alerts`.
 - No distributed tracing (OpenTelemetry); request IDs correlate logs and
   usage rows.
 
@@ -420,14 +489,14 @@ everything else is an opt-in profile:
 
 ```bash
 docker compose up -d --build                                  # gateway + PostgreSQL
-docker compose --profile console --profile monitoring up -d   # + console, Prometheus, Grafana
-docker compose --profile ingress --profile console up -d      # + Caddy TLS ingress (docs/OPERATIONS.md)
+docker compose --profile monitoring up -d                     # + Prometheus, Grafana
+docker compose --profile ingress up -d                        # + Caddy TLS ingress (docs/OPERATIONS.md)
 ```
 
 | Open | What |
 |---|---|
 | http://localhost:8000/docs | Gateway API |
-| http://localhost:8501 | **Test console** (`console` profile); enter the admin token in the sidebar |
+| http://localhost:8000/app | **Web console**: sign in, teams, keys, providers, models, usage, savings |
 | http://localhost:3001 | Grafana, "TwinLM Gateway" dashboard (`monitoring` profile, read-only without login) |
 | http://localhost:9090 | Prometheus with alert rules (`monitoring` profile) |
 
@@ -443,7 +512,7 @@ Nothing to configure first:
   `GATEWAY_CONFIG_FILE=./loadtest/gateway.mock.toml` to `.env` for mock
   providers.
 - **Ports are bound to 127.0.0.1 only.** For shared access use the
-  `ingress` profile (TLS; only `/v1` public; basic auth on operator UIs)
+  `ingress` profile (TLS; only `/v1` public on the API domain; the console domain has its own sign-in)
   rather than widening `*_BIND`.
 
 Services: **secrets** (one-shot), **gateway** (non-root, health check on
@@ -462,6 +531,19 @@ docker compose down -v           # stop and delete data + generated secrets
 
 The gateway image alone: `docker build -t twinlm . && docker run -p 8000:8000 --env-file .env twinlm`
 (SQLite at `/app/data`; mount a volume there to keep it).
+
+## Running several instances
+
+One instance is the default. To run several behind a load balancer, point
+them at the same PostgreSQL and set `REDIS_URL` (Redis 6.2+). Then these are
+shared: rate-limit windows, the exact-match cache, budget reservations, API-key
+revocation (immediate on every instance) and providers/aliases/prices changed
+in the console (other instances reload within 5 seconds). Still per instance:
+circuit breakers and latency stats (each learns provider health from its own
+traffic), the semantic cache and the usage outbox. If Redis is unreachable,
+limits and the cache fail open (requests are served, unlimited and uncached)
+and the gateway logs it; Redis is skipped for 10 s after an error so an outage
+doesn't slow requests down.
 
 ## Testing
 
@@ -497,47 +579,41 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
-## Test console (Streamlit)
+## Web console
 
-A browser UI for exercising the gateway by hand:
+The gateway serves a web console at **http://localhost:8000/app** (Next.js, built into the gateway image; source
+in `console/`). People sign in with their own email and password; on first start it asks for the admin token
+once to create the first admin.
+
+| Page | What |
+|---|---|
+| Overview | Requests, spend, savings and cache hit rate for 30 days; spend per day; top models |
+| Playground | Chat with any model, streaming or not; billed to your team; shows provider, latency, tokens and cache hits |
+| Teams | Members with roles and last activity, team keys, team usage |
+| People | Everyone who can sign in: add, make admin, disable, reset password (admins) |
+| Keys | All active keys across teams (admins) |
+| Providers | Add providers with an API key, test the connection, enable/disable, replace keys (admins) |
+| Models | What each model name tries in order, output caps, cache TTL, prices (admins) |
+| Usage, Savings, Health | Company-wide reports and provider status (admins) |
+| Budgets | Company, team and person spending limits with live progress and alerts (admins) |
+
+Develop it with the gateway running on :8000:
 
 ```bash
-pip install -r ui/requirements.txt
-streamlit run ui/streamlit_app.py      # http://localhost:8501
+cd console && npm install && npm run dev      # http://localhost:3000/app (API proxied to :8000)
+npx playwright test                           # end-to-end test against a running gateway (TWINLM_URL)
 ```
-
-(Or `docker compose --profile console up -d`. See [Docker](#docker).)
-
-Set the fixed gateway URL with `GATEWAY_URL` before starting the console.
-Enter an API key or admin token in the sidebar for each browser session; the
-console no longer inherits either credential from its environment. Keep the
-console on a private interface, as it has no login of its own. Tabs:
-
-| Tab | What you can test |
-|---|---|
-| Chat | stateless or stateful, streaming on/off, model, temperature, max tokens; shows provider, tokens, latency, TTFT, cache status and request ID per reply |
-| Structured output | `json_object` / `json_schema` with an editable schema |
-| Embeddings | vectors for several inputs plus a cosine-similarity table |
-| Providers | circuit state, error rate, latency, in-flight count; model registry and prices |
-| Usage | requests, errors, fallbacks, cache hit rate, tokens and cost by provider / model / project / key |
-| API keys | create keys (allowed models, RPM, TPM, budget), use one in the console, revoke, clear the cache |
-| Burst test | N concurrent requests, showing status codes, provider split, p50/p95 and cache hits. Use it to trigger rate limits, fallback and circuit breaking |
-
-Admin tabs need `ADMIN_TOKEN` set on the gateway. To try it without
-provider keys, start the gateway with
-`GATEWAY_CONFIG_PATH=loadtest/gateway.mock.toml` (mock replies; structured
-output will correctly fail validation there, since mocks don't produce
-JSON).
 
 ## Limitations
 
-- Breakers, rate-limit windows and the cache are per process: one gateway
-  instance is the supported baseline.
+- Without `REDIS_URL`, breakers, rate-limit windows, budget reservations and
+  the cache are per process: one gateway instance. With it, see
+  [several instances](#running-several-instances).
 - Measured capacity and overhead: [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md)
   (one machine, mock providers; not a capacity guarantee).
-- The daily budget is advisory; no SSO (user identity = which key a person holds).
-- `n > 1`, semantic caching, batch/queued execution and tracing are not
-  implemented.
+- Budgets are hard only for priced models with an output cap (see
+  [Budgets](#budgets-and-alerts)); no SSO (user identity = which key a person holds).
+- `n > 1`, batch/queued execution and tracing are not implemented.
 - Tools and images are stateless-only: with `conversation_id` they return
   400. Falling back from one provider to another mid tool-conversation
   works, but tool-call ids don't carry over.

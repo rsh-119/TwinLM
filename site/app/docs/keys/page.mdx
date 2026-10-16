@@ -1,0 +1,114 @@
+export const metadata = { title: "Keys, limits and budgets" };
+
+# Keys, limits and budgets
+
+Give every application, team or person its own gateway key. Keys are how TwinLM attributes spend and applies
+limits. They look like `gw_live_…`, are 256-bit random, and only their SHA-256 hash is stored; the raw key is
+shown once, when it is created.
+
+## Two kinds of token
+
+| Credential | Sent as | Used for |
+| --- | --- | --- |
+| **Admin token** (`ADMIN_TOKEN`) | `Authorization: Bearer …` on `/admin/*` | Creating keys, reports, cache. Keep it with operators only |
+| **Gateway key** (`gw_live_…`) | The OpenAI SDK's `api_key` | Calling `/v1/*` from your apps |
+
+With auth on (the default), startup fails if `ADMIN_TOKEN` is empty, since no key could ever be created. An empty
+`ADMIN_TOKEN` with auth off disables the admin API entirely.
+
+## Creating a key
+
+```bash
+curl -X POST http://localhost:8000/admin/keys \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{
+        "name": "support-bot",
+        "project": "support",
+        "allowed_models": ["fast", "auto"],
+        "rpm_limit": 120,
+        "tpm_limit": 200000,
+        "daily_budget_usd": 20
+      }'
+```
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `name` | yes | A label for people (1–100 chars) |
+| `project` | yes | Groups keys for reports and isolates cache and stateful data. `default` is reserved |
+| `allowed_models` | no | Aliases or models this key may use; omitted = all. Others get 403 |
+| `rpm_limit` | no | Requests per minute |
+| `tpm_limit` | no | Tokens per minute |
+| `daily_budget_usd` | no | Advisory daily spend limit (UTC day) |
+| `user_id` | no | Makes this a **user-bound** key ([below](#service-keys-and-user-bound-keys)) |
+
+The response contains the key's settings plus `key`, the raw value. Store it in your app's secret store.
+
+## Projects
+
+Each key belongs to a **project**: an app, team or customer. Usage and savings can be grouped by project, the
+cache never shares answers across projects, and conversations and memories are visible only inside their project.
+
+## Rate limits
+
+Per key, over sliding 60-second windows:
+
+- **Requests per minute** (`rpm_limit`)
+- **Tokens per minute** (`tpm_limit`). Tokens are counted when the provider reports them, so one large request can
+  overshoot before the next one is rejected.
+
+Exceeding a limit returns **429** with a `Retry-After` header. Keys without their own limits use the defaults
+from `gateway.toml` (omit them for unlimited):
+
+```toml
+[rate_limits]
+default_rpm = 60
+default_tpm = 100000
+```
+
+## Daily budget
+
+`daily_budget_usd` rejects a key's requests with **429** once today's (UTC) spend for that key reaches the budget.
+Spend counts settled requests plus usage still queued locally.
+
+<Note title="The budget is advisory">
+Requests already in flight when the budget is reached still complete, and requests with an unknown price aren't
+counted, so actual spend can exceed the budget. Set spend limits at your providers as the hard stop.
+</Note>
+
+## Listing, rotating and revoking
+
+```bash
+curl http://localhost:8000/admin/keys -H "Authorization: Bearer $ADMIN_TOKEN"                        # list (no raw keys)
+curl -X POST http://localhost:8000/admin/keys/key_…/rotate -H "Authorization: Bearer $ADMIN_TOKEN"  # new key, same settings
+curl -X DELETE http://localhost:8000/admin/keys/key_… -H "Authorization: Bearer $ADMIN_TOKEN"       # revoke
+```
+
+Rotation returns a new key with the same project, user, limits and budget; the old key keeps working until you
+revoke it, so apps can switch over without downtime. Add `?revoke_old=true` to revoke it immediately. Revocation
+takes effect at once.
+
+## Service keys and user-bound keys
+
+| Key | Created with | Can do |
+| --- | --- | --- |
+| **Service key** | no `user_id` | Any `/v1` call in its project; may act for any user in the project |
+| **User-bound key** | `"user_id": "alice"` | Same, but conversations and memories only for alice |
+
+The distinction only matters for the optional [conversations and memories](/docs/stateful/). Set
+`STATEFUL_REQUIRES_USER_KEYS=true` to stop service keys from touching them at all.
+
+## Auth errors
+
+| Status | When |
+| --- | --- |
+| 401 | Missing, invalid or revoked key |
+| 403 | Model not in the key's `allowed_models` |
+| 429 | Rate limit or daily budget exceeded (`Retry-After` header) |
+
+## Running without auth
+
+`AUTH_ENABLED=false` turns keys off: every request lands in the reserved `default` project, with no per-key limits.
+Use it only for a private, single-user setup on your own machine.
+
+Validated keys are cached in memory for `AUTH_CACHE_SECONDS` (30 by default) to save a database round trip;
+revoke and rotate clear that cache immediately.

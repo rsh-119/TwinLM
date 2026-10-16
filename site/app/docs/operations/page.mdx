@@ -1,0 +1,122 @@
+export const metadata = { title: "Operations runbook" };
+
+# Operations runbook
+
+Procedures for the supported setup: **one gateway instance and PostgreSQL** under Docker Compose. Commands assume
+the default Compose project; with the quickstart file, add `-f quickstart.yml` to each `docker compose` command.
+
+<Note title="Safety">
+Never run restore drills or destructive commands against a database you can't afford to lose. The restore drill
+below uses a throwaway container.
+</Note>
+
+## Operator CLI
+
+The gateway image includes `python -m app.ops`:
+
+| Command | Does |
+| --- | --- |
+| `migrate` / `migrate --check` | Apply pending migrations / exit 1 if any are pending |
+| `verify` | Check the schema version and print table row counts |
+| `retention …` | Delete old request logs, conversations and memories ([below](#retention-and-deletion)) |
+| `outbox status / list / reconcile / requeue / export` | Inspect and repair the usage outbox ([below](#usage-outbox)) |
+
+Run them with `docker compose exec gateway python -m app.ops <command>`.
+
+## Upgrades and migrations
+
+Migrations are versioned, forward-only and recorded in a `schema_migrations` table. The gateway applies pending
+ones at startup under a database lock. It refuses to start against a schema **newer** than it knows, and, with
+`MIGRATE_ON_STARTUP=false`, against an older one.
+
+1. Back up (below).
+2. Check with the new image:
+   `docker compose run --rm --no-deps --entrypoint python gateway -m app.ops migrate --check`
+3. Deploy the new image (`docker compose pull && docker compose up -d`). It migrates on start, or run `migrate`
+   first if `MIGRATE_ON_STARTUP=false`.
+4. `docker compose exec gateway python -m app.ops verify`
+
+**Rollback** means restoring the pre-upgrade backup and running the previous image. There are no down-migrations.
+
+## Backup and restore
+
+From a clone of the repository:
+
+```bash
+scripts/backup.sh ./backups      # pg_dump -Fc + a consistent copy of the usage outbox + sha256 checksums
+```
+
+Encrypt and copy backups off the host on a schedule, for example with [age](https://age-encryption.org):
+
+```bash
+age -r "$BACKUP_RECIPIENT" -o twinlm-<stamp>.dump.age backups/twinlm-<stamp>.dump
+```
+
+**Restore drill** (safe: restores into a throwaway container and verifies schema and row counts):
+
+```bash
+scripts/restore_drill.sh backups/twinlm-<stamp>.dump twinlm-gateway
+```
+
+**Real restore** (destructive: replaces live data):
+
+```bash
+docker compose stop gateway
+docker compose exec -T postgres pg_restore -U twinlm -d twinlm --clean --if-exists --no-owner < backups/twinlm-<stamp>.dump
+docker compose start gateway
+docker compose exec gateway python -m app.ops verify
+```
+
+Usage records still in the outbox at backup time are in `usage-spool-<stamp>.db`. Copying it to
+`/app/data/usage-spool.db` (gateway stopped) replays them; replays are de-duplicated by request ID.
+
+## Retention and deletion
+
+Nothing is deleted automatically. Usage records contain no prompt text; conversations and memories do.
+
+```bash
+docker compose exec gateway python -m app.ops retention --request-logs-days 400 --conversations-days 180 --dry-run
+docker compose exec gateway python -m app.ops retention --request-logs-days 400 --conversations-days 180
+```
+
+Conversations age by last update and take their messages with them; `--memories-days` ages memories by creation.
+Delete one conversation with `DELETE /v1/conversations/{id}`. Backups keep deleted data until they expire, so align
+backup retention with this policy.
+
+## Key rotation
+
+| Secret | How |
+| --- | --- |
+| Gateway API key | `POST /admin/keys/{id}/rotate`, switch the app over, then `DELETE /admin/keys/{old id}` (or `?revoke_old=true`) |
+| Admin token | `docker compose run --rm secrets sh -c 'rm /secrets/admin_token'`, then `docker compose up -d secrets gateway`; tell operators |
+| Provider key | Create the new key at the provider, update `.env`, `docker compose up -d gateway`, then revoke the old one at the provider |
+| PostgreSQL password | `ALTER USER twinlm PASSWORD '…'` in postgres, write the same value to `/secrets/postgres_password`, restart the gateway |
+
+## Usage outbox
+
+Each request's usage record is first written to a local SQLite outbox (`/app/data/usage-spool.db` on the
+`gateway-data` volume), then copied to the database in the background. That is why a database outage doesn't lose
+usage data.
+
+```bash
+docker compose exec gateway python -m app.ops outbox status      # pending and deadletter counts
+docker compose exec gateway python -m app.ops outbox list        # deadletter rows (no prompt text)
+docker compose exec gateway python -m app.ops outbox reconcile   # drop deadletters already in the database
+docker compose exec gateway python -m app.ops outbox requeue     # retry deadletters after fixing the cause
+docker compose exec gateway python -m app.ops outbox export /app/data/deadletter.jsonl
+```
+
+A growing **pending** count means the database is unreachable; it drains by itself when the database is back.
+**Deadletters** are rows the database rejected (often a pending migration); fix the cause, then `requeue`.
+Don't delete the `gateway-data` volume while rows are pending.
+
+## Database outages
+
+While PostgreSQL is down, stateless chat with already-validated keys keeps working and usage waits in the outbox.
+Anything that needs the database (new keys, stateful turns, budgeted keys, reports) returns **503 database
+unavailable** with `Retry-After: 5`. `/ready` reports not-ready.
+
+## Costs and invoices
+
+Costs are estimates from your configured prices. Reconcile `/admin/usage` against provider invoices monthly, watch
+`unpriced_requests`, and keep provider-side spend limits as the hard stop.

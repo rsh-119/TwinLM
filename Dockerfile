@@ -1,3 +1,12 @@
+# Stage 1: the web console (Next.js static export, served by the gateway at /app)
+FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS console
+WORKDIR /console
+COPY console/package.json console/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY console/ ./
+RUN npm run build
+
+# Stage 2: the gateway
 FROM python:3.11-slim@sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -14,6 +23,7 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 COPY app ./app
 COPY gateway.toml .
+COPY --from=console /console/out ./console
 
 # Unprivileged runtime user; /app/data holds the usage outbox (and the
 # SQLite file when no DATABASE_URL is given) - mount a volume there.
@@ -23,7 +33,8 @@ RUN useradd --create-home --uid 10001 twinlm \
 USER twinlm
 
 ENV DATABASE_URL=sqlite:////app/data/twinlm.db \
-    USAGE_SPOOL_PATH=/app/data/usage-spool.db
+    USAGE_SPOOL_PATH=/app/data/usage-spool.db \
+    CONSOLE_DIR=/app/console
 
 EXPOSE 8000
 

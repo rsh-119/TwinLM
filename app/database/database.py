@@ -21,6 +21,10 @@ settings = get_settings()
 
 def _database_url():
     url = make_url(settings.database_url)
+    # Hosted Postgres (Render, Neon, Heroku...) hands out postgres(ql)://
+    # URLs; the only installed driver is psycopg 3.
+    if url.drivername in ("postgres", "postgresql"):
+        url = url.set(drivername="postgresql+psycopg")
     if settings.database_password_file and url.password is None:
         url = url.set(password=Path(settings.database_password_file).read_text(encoding="utf-8").strip())
     return url
@@ -153,11 +157,38 @@ def _user_keys_and_deployments(conn: Connection) -> None:
     _add_columns(conn, {"api_keys": {"user_id": "VARCHAR"}, "request_logs": {"deployment": "VARCHAR"}})
 
 
+def _runtime_config_tables(conn: Connection) -> None:
+    """Migration 3: providers, aliases and prices managed from the admin
+    panel. New tables only; create_all() builds them, so this is a no-op
+    marker kept for the version history."""
+    Base.metadata.create_all(
+        bind=conn,
+        tables=[Base.metadata.tables[t] for t in ("provider_configs", "alias_overrides", "price_overrides")
+                if t in Base.metadata.tables],
+    )
+
+
+def _teams_and_users(conn: Connection) -> None:
+    """Migration 4: console users, teams, sessions (new tables, built by
+    create_all); key creator and provider auth header columns."""
+    _add_columns(conn, {"api_keys": {"created_by": "VARCHAR"}, "provider_configs": {"auth_header": "VARCHAR"}})
+
+
+def _budgets(conn: Connection) -> None:
+    """Migration 5: budgets and budget alerts (new tables, built by
+    create_all); request_logs.user_id for user budgets."""
+    _add_columns(conn, {"request_logs": {"user_id": "VARCHAR"}})
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_request_logs_user_id ON request_logs (user_id)"))
+
+
 # Append only. Each migration must be idempotent: it also runs after
 # create_all() has built a fresh schema.
 MIGRATIONS: List[Tuple[int, Callable[[Connection], None]]] = [
     (1, _add_missing_columns),
     (2, _user_keys_and_deployments),
+    (3, _runtime_config_tables),
+    (4, _teams_and_users),
+    (5, _budgets),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 

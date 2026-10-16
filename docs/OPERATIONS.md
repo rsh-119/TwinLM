@@ -17,8 +17,8 @@ docker compose up -d --build      # secrets + postgres + gateway (minimal)
 docker compose exec gateway cat /run/secrets/admin_token
 ```
 
-Optional profiles: `--profile console` (Streamlit test console),
-`--profile monitoring` (Prometheus with `monitoring/alerts.yml` + Grafana),
+The web console is at http://localhost:8000/app (sign in; first start asks for the admin token once).
+Optional profiles: `--profile monitoring` (Prometheus with `monitoring/alerts.yml` + Grafana),
 `--profile ingress` (Caddy TLS, below). Ports bind to 127.0.0.1.
 
 Keys: create a **service key** per application (`POST /admin/keys` with
@@ -40,15 +40,16 @@ put an identity-aware proxy in front instead of basic auth.
 TWINLM_DOMAIN=api.example.com
 CONSOLE_DOMAIN=console.example.com
 GRAFANA_DOMAIN=grafana.example.com
-docker compose --profile ingress --profile console --profile monitoring up -d
+docker compose --profile ingress --profile monitoring up -d
 docker compose exec caddy cat /run/secrets/console_password   # basic-auth password (user: operator)
 ```
 
 `deploy/Caddyfile` exposes **only `/v1/*`** on the API host (every call needs
-a gateway key). `/admin`, `/metrics` and `/docs` are never proxied: use the
-console (server-side, inside the Compose network) or an SSH tunnel to
-`127.0.0.1:8000`. Console and Grafana sit behind HTTP basic auth over TLS.
-Keep `GATEWAY_BIND`, `UI_BIND`, `GRAFANA_BIND`, `PROMETHEUS_BIND` on
+a gateway key). The console host serves the web console (`/app`) and the
+APIs it uses (`/auth`, `/console`, `/admin`, `/v1`) to signed-in people;
+`/metrics` and `/docs` are never proxied. Grafana sits behind HTTP basic
+auth over TLS (`console_password`, user `operator`).
+Keep `GATEWAY_BIND`, `GRAFANA_BIND`, `PROMETHEUS_BIND` on
 127.0.0.1. Without real DNS, the `*.localhost` defaults use Caddy's internal
 CA for local testing.
 

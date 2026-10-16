@@ -1,0 +1,132 @@
+export const metadata = { title: "Deployment" };
+
+# Deployment
+
+TwinLM ships as a container image, `ghcr.io/rsh-119/twinlm:latest`. You never need to clone the repository to run
+it. Pick the option that fits.
+
+| Option | Database | Best for |
+| --- | --- | --- |
+| [Docker Compose quickstart](#docker-compose-quickstart) | PostgreSQL | Most teams: one VM or server |
+| [Single container](#single-container) | SQLite (built in) | Trying it out, one person |
+| [Render](#render) | Managed PostgreSQL | No servers of your own |
+| [Full Compose stack](#full-compose-stack-from-the-repository) | PostgreSQL | Adds the test console, monitoring and TLS ingress |
+| [From source](#from-source) | SQLite or PostgreSQL | Development |
+
+Any cloud VM (AWS, GCP, Azure, DigitalOcean, Hetzner…) works the same way: install Docker, then use the
+Compose quickstart.
+
+## Docker Compose quickstart
+
+One file, `deploy/quickstart.yml`: a one-shot container that generates secrets, PostgreSQL 16, and the gateway.
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/rsh-119/TwinLM/main/deploy/quickstart.yml
+echo "GEMINI_API_KEY=..." >> .env
+echo "GROQ_API_KEY=..." >> .env
+docker compose -f quickstart.yml up -d
+docker compose -f quickstart.yml exec gateway cat /run/secrets/admin_token
+```
+
+- **Secrets** (admin token, PostgreSQL password) are generated randomly on first start into the `secrets` volume
+  and reused afterwards.
+- **Your own config:** save a `gateway.toml` next to `quickstart.yml` and uncomment the line
+  `- ./gateway.toml:/app/gateway.toml:ro` under the gateway's volumes. See [gateway.toml reference](/docs/config/).
+- **Port:** the gateway binds to `127.0.0.1:8000`. Change with `GATEWAY_BIND` and `GATEWAY_PORT` in `.env`, but
+  read [Exposing it to a network](#exposing-it-to-a-network) first.
+- **Pin a version:** set `TWINLM_IMAGE=ghcr.io/rsh-119/twinlm:<tag>` in `.env` instead of `latest`.
+
+## Single container
+
+```bash
+export ADMIN_TOKEN=$(openssl rand -hex 32)   # keep it: you need it for /admin
+docker run -d --name twinlm -p 8000:8000 \
+  -e GEMINI_API_KEY=... -e GROQ_API_KEY=... \
+  -e ADMIN_TOKEN \
+  -v twinlm-data:/app/data \
+  ghcr.io/rsh-119/twinlm:latest
+```
+
+Data goes to SQLite in the `twinlm-data` volume. For PostgreSQL, add
+`-e DATABASE_URL=postgresql+psycopg://user:pass@host:5432/db`. For your own config, add
+`-v "$PWD/gateway.toml:/app/gateway.toml:ro"`.
+
+## Render
+
+[Deploy to Render](https://render.com/deploy?repo=https://github.com/rsh-119/TwinLM) uses the repository's
+`render.yaml`: the published image as a web service, a managed PostgreSQL database, a 1 GB disk for the usage
+outbox, and a generated `ADMIN_TOKEN`. After it deploys, add `GEMINI_API_KEY` / `GROQ_API_KEY` in the service's
+**Environment** tab and copy the admin token from there. It uses paid Render plans.
+
+<Note>
+The Render blueprint has not been tested on Render yet. Hosted PostgreSQL URLs of the form `postgres://…` are
+accepted and switched to the right driver automatically.
+</Note>
+
+## Full Compose stack (from the repository)
+
+The repository's `docker-compose.yml` runs the same minimal set and adds optional **profiles**:
+
+```bash
+git clone https://github.com/rsh-119/TwinLM && cd TwinLM
+cp .env.example .env                                   # provider keys and switches
+docker compose up -d --build                           # secrets + PostgreSQL + gateway
+docker compose --profile monitoring up -d              # + Prometheus (:9090, alert rules) + Grafana (:3001)
+docker compose --profile ingress up -d                 # + Caddy TLS ingress
+```
+
+| URL | What |
+| --- | --- |
+| `http://localhost:8000/docs` | Interactive API docs (FastAPI) |
+| `http://localhost:8000/app` | Web console: sign in, teams, keys, providers, models, usage |
+| `http://localhost:3001` | Grafana "TwinLM Gateway" dashboard (`monitoring`) |
+| `http://localhost:9090` | Prometheus with alert rules (`monitoring`) |
+
+Without provider keys, add `GATEWAY_CONFIG_FILE=./loadtest/gateway.mock.toml` to `.env`.
+
+## From source
+
+```bash
+git clone https://github.com/rsh-119/TwinLM && cd TwinLM
+python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env                                   # add provider keys and ADMIN_TOKEN
+python -m uvicorn app.main:app --reload
+```
+
+Python 3.11+. The default database is SQLite (`DATABASE_URL=sqlite:///./llm_gateway.db` in `.env.example`).
+
+## Exposing it to a network
+
+All ports bind to `127.0.0.1` on purpose. To let other machines reach the gateway, put TLS in front instead
+of widening the bind. The `ingress` profile runs [Caddy](https://caddyserver.com) with automatic HTTPS:
+
+```bash
+# .env
+TWINLM_DOMAIN=api.example.com
+CONSOLE_DOMAIN=console.example.com
+GRAFANA_DOMAIN=grafana.example.com
+```
+
+```bash
+docker compose --profile ingress --profile monitoring up -d
+docker compose exec caddy cat /run/secrets/console_password   # Grafana basic auth, user "operator"
+```
+
+- Only `/v1/*` is public on the API domain; every call still needs a gateway key.
+- `/admin`, `/metrics` and `/docs` are never proxied. Use the console or an SSH tunnel to `127.0.0.1:8000`.
+- The console domain serves the web console; people sign in with their own accounts. Grafana sits behind HTTP basic
+  auth over TLS.
+- DNS for the domains must point at the host, and ports 80/443 must be reachable for Let's Encrypt.
+
+Any other reverse proxy (nginx, Traefik, a cloud load balancer) works too: forward only `/v1/` to port 8000.
+
+## Production checklist
+
+1. **Back up** PostgreSQL off the host on a schedule ([Operations](/docs/operations/#backup-and-restore)).
+2. **TLS** in front of the gateway, with only `/v1` exposed.
+3. **One key per app**, with `rpm_limit`, `tpm_limit` and `daily_budget_usd` ([Keys](/docs/keys/)).
+4. **Verify prices** in `[pricing]` against your providers' current lists.
+5. **Provider-side spend limits** as the hard stop; TwinLM's budget is advisory.
+6. **Alerts** delivered somewhere a person will see them ([Monitoring](/docs/monitoring/)).
+7. **One gateway instance.** Do not scale horizontally yet ([Performance](/docs/performance/)).

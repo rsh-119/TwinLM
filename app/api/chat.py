@@ -33,7 +33,7 @@ from app.auth import Principal, authenticate
 from app.database import repository
 from app.database.database import get_db, release_connection
 from app.database.models import Conversation
-from app.gateway import structured
+from app.gateway import budgets, structured
 from app.gateway.guardrails import GuardrailViolation
 from app.gateway.usage import UsageRecord, finish
 from app.memory.conversation_manager import ConversationManager
@@ -93,26 +93,35 @@ async def _complete(
     _reject_unsupported(body)
     _check_request_metadata(body, services, record)
     validator, json_mode = _structured_output(body)
-    admit(body.model, principal, services, db, record)
+    admit(body.model, principal, services, db, record, _estimate(body, model_router, services))
 
     manager, conversation, user_message, messages = _prepare_turn(body, db, principal, services, record)
     params = _checked_generation_params(body, services, record)
 
     cache_key = None
+    semantic_key = None  # (scope, embedding) to store the answer under
     cache_ttl = services.config.cache_ttl(body.model)
     cacheable = (
         services.config.cache.enabled and conversation is None and cache_ttl != 0
         and not params.get("temperature")  # sampled replies are meant to vary
     )
     if cacheable and not services.guardrails.contains_sensitive(messages):
-        cache_key = services.cache.make_key(
+        cache_parts = dict(
             model=body.model,
-            messages=messages,
             params=params,
             response_format=body.response_format.model_dump(by_alias=True) if body.response_format else None,
             project=principal.project if principal else None,
         )
+        cache_key = services.cache.make_key(messages=messages, **cache_parts)
         cached: Optional[RouteResult] = services.cache.get(cache_key)
+        if (cached is None and services.semantic_cache is not None
+                and body.model in services.config.cache.semantic.models):
+            semantic_key = await _semantic_key(messages, cache_parts, model_router, db, principal, services, record)
+            found = services.semantic_cache.get(*semantic_key) if semantic_key else None
+            if found is not None:
+                cached, similarity = found
+                if response is not None:
+                    response.headers["X-Cache-Similarity"] = f"{similarity:.4f}"
         if response is not None:
             response.headers["X-Cache"] = "HIT" if cached else "MISS"
         if cached is not None:
@@ -161,9 +170,44 @@ async def _complete(
             raise HTTPException(status_code=409, detail="conversation changed during generation; retry the turn")
         await stateful.maybe_summarize(manager, model_router, conversation.id, body.model, principal, services)
     elif cache_key is not None and not output_sensitive and not result.tool_calls:
-        services.cache.set(cache_key, result._replace(content=content, usage=usage), cache_ttl)
+        answer = result._replace(content=content, usage=usage)
+        services.cache.set(cache_key, answer, cache_ttl)
+        if semantic_key is not None:
+            services.semantic_cache.set(*semantic_key, answer, cache_ttl)
 
     return _response(record, content, result.tool_calls, result.finish_reason)
+
+
+async def _semantic_key(
+    messages: List[dict],
+    cache_parts: dict,
+    model_router: ModelRouter,
+    db: Session,
+    principal: Optional[Principal],
+    services: GatewayServices,
+    record: UsageRecord,
+) -> Optional[Tuple[str, List[float]]]:
+    """(scope, embedding of the last user message) for the semantic cache,
+    or None when the request doesn't fit (last message isn't plain user
+    text) or the embeddings call fails - then the request just goes on
+    uncached. The embeddings call is logged as its own request."""
+    last = messages[-1]
+    if last.get("role") != "user" or not isinstance(last.get("content"), str):
+        return None
+    scope = services.cache.make_key(semantic=True, context=messages[:-1], **cache_parts)
+    embedding_model = services.config.cache.semantic.embedding_model
+    embed_record = UsageRecord(f"{record.request_id}-semantic", "embeddings", embedding_model, principal=principal)
+    release_connection(db)
+    try:
+        with provider_errors(embed_record):
+            result = await model_router.embed(embedding_model, [last["content"]])
+        embed_record.served_by(result)
+        return scope, result.vectors[0]
+    except HTTPException:
+        logger.warning("semantic cache skipped, embedding failed: %s", embed_record.error)
+        return None
+    finally:
+        finish(db, embed_record, services.config.pricing, services.limiter, services.usage_writer)
 
 
 def _response(
@@ -365,7 +409,7 @@ async def stream_chat_turn(
         _reject_unsupported(body)
         _check_request_metadata(body, services, record)
         _structured_output(body)
-        admit(body.model, principal, services, db, record)
+        admit(body.model, principal, services, db, record, _estimate(body, model_router, services))
         manager, conversation, user_message, messages = _prepare_turn(body, db, principal, services, record)
 
         collected: List[str] = []
@@ -513,6 +557,23 @@ def _check_request_metadata(body: ChatCompletionRequest, services: GatewayServic
     except GuardrailViolation as exc:
         record.fail(400, str(exc), "blocked")
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+def _estimate(body: ChatCompletionRequest, model_router: ModelRouter, services: GatewayServices) -> float:
+    """Worst-case cost reserved against budgets while the request runs."""
+    try:
+        targets = model_router.resolve(body.model)
+    except ValueError:
+        return 0.0  # unknown model: routing rejects it
+    cap = services.config.output_cap(body.model)
+    requested = body.generation_params().get("max_tokens")
+    max_output = min(requested or cap, cap) if cap else requested
+    chars = sum(
+        len(m.content) if isinstance(m.content, str)
+        else sum(len(p.text) for p in m.content or [] if p.type == "text")
+        for m in body.messages
+    )
+    return budgets.worst_case_cost(targets, services.config.pricing, chars, max_output)
 
 
 def _checked_generation_params(

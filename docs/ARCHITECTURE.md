@@ -30,7 +30,7 @@ flowchart LR
   Client[SDK / application] --> Ingress[Caddy TLS ingress<br/>optional profile]
   Ingress --> HTTP
   Client -. private host .-> HTTP[FastAPI gateway]
-  Console[Streamlit console<br/>optional profile] --> HTTP
+  Console[Web console /app<br/>Next.js, served by the gateway] --> HTTP
   HTTP --> Auth[API key / admission]
   Auth --> Proxy[Stateless chat + embeddings]
   Proxy --> Stateful[Optional stateful layer<br/>conversations, memories, summaries]
@@ -63,13 +63,17 @@ providers' answers equivalent.
 1. Middleware assigns a server request ID, bounds body size and in-flight
    requests. Pydantic validates the schema; unknown request fields are
    rejected (below). `/v1` uses gateway API keys, `/admin` a separate token.
-2. Admission: model allow-list, local RPM/TPM windows, **advisory** daily
-   budget (settled + locally pending known cost).
+2. Admission: model allow-list, RPM/TPM windows, budgets (key, team, user,
+   org): settled + locally pending + in-flight reserved cost + this request's
+   worst case must stay within each limit; the worst case is reserved until
+   the request's usage row is queued (`app/gateway/budgets.py`).
 3. Stateless requests send the client's messages after input guardrails and
    touch no conversation data. Requests with `conversation_id` go through
    `app/api/stateful.py`: ownership check, summary + bounded recent window +
    capped memories, guardrails on the assembled context. Optional exact-match
-   cache (off by default) applies only to eligible stateless non-streaming turns.
+   cache (off by default) applies only to eligible stateless non-streaming turns;
+   for aliases in `[cache.semantic] models`, a miss embeds the last user message
+   and may reuse an answer to a similar one (same earlier context).
 4. The router resolves the model to **model groups of deployments**, drops
    deployments lacking a needed capability, orders by strategy, and tries
    each deployment with per-attempt/total timeouts and bounded retries
@@ -142,7 +146,8 @@ was issued to whom.
 ### Current: persistence and migrations
 
 Tables: `conversations`, `messages`, `memories`, `api_keys`, `request_logs`,
-`schema_migrations`. Migrations are versioned, forward-only and idempotent,
+console users/teams/sessions, admin-panel providers/aliases/prices, `budgets`,
+`budget_alerts`, `schema_migrations`. Migrations are versioned, forward-only and idempotent,
 applied at startup under a database lock (or by `python -m app.ops migrate`
 with `MIGRATE_ON_STARTUP=false`); a newer-than-code schema is refused.
 Upgrades from the v1 schema are tested on SQLite and PostgreSQL 16
@@ -157,7 +162,11 @@ their own rows). Missing usage fields or prices are **unknown (null), never 0**;
 0 and are excluded from provider token totals. Gemini thinking tokens count as
 output. A request's tokens are attributed to the deployment that served the
 final answer, even if a repair call used another one; its cost is exact per
-call. The daily budget is **advisory** (see Target).
+call. Budgets reserve each request's worst-case cost at admission, so they
+hold for priced models with an output cap; unpriced calls reserve nothing.
+Alerts (80%, 100% or first refusal) are recorded once per budget period in
+`budget_alerts` (unique constraint, so once across instances) and sent to
+`BUDGET_ALERT_WEBHOOK_URL`.
 
 Cost controls: an output-token cap (`default_max_output_tokens`, per-alias
 `max_output_tokens`) fills in or clamps `max_tokens`; the exact-match cache
@@ -179,7 +188,7 @@ add `console`, `monitoring` (Prometheus + `monitoring/alerts.yml` + Grafana)
 and `ingress` (Caddy: automatic TLS, only `/v1/*` public, basic auth on
 operator UIs). Images are pinned by digest; Python dependencies are
 hash-locked (`requirements.lock`, `requirements-dev.lock`,
-`ui/requirements.lock`, compiled for Linux/Python 3.11). Breakers, RPM/TPM
+compiled for Linux/Python 3.11; the console's npm lock in `console/`). Breakers, RPM/TPM
 windows and the cache are process-local: **one gateway instance is the
 supported baseline**. The PostgreSQL pool is persistent (`DB_POOL_SIZE`,
 pre-ping, 3 s connect timeout). During a database outage, stateless chat with
@@ -191,9 +200,9 @@ that needs the database returns `503 database unavailable` with
 
 | Item | Decision / trigger |
 | --- | --- |
-| Hard budgets | Not implemented. Needs atomic reservation of worst-case cost (bounded `max_tokens`, verified prices) at admission, settlement on finish, an unknown-price policy, and crash-safe expiry of reservations. Until then budgets stay advisory and provider spend limits are the hard stop. |
+| Budgets for unpriced models | Implemented for priced models: worst-case reservation at admission, release when the usage row is queued, Redis reservations expire after 15 min if an instance crashes. Unpriced models reserve nothing; provider spend limits remain their hard stop. Images and stateful context are not in the input estimate. |
 | SSO / identity provider | Not implemented. **External input:** IdP choice. Then map IdP subjects to user-bound keys or front the gateway with an identity-aware proxy. |
-| Multiple gateway instances | Not supported. First move admission and budget reservation to shared state; cache and breaker sharing are separate choices. Revisit only with a measured need. |
+| Multiple gateway instances | With `REDIS_URL` (`app/gateway/shared.py`): RPM/TPM windows, exact cache, budget reservations, key revocation and console config changes are shared; fails open when Redis is down. Breakers, latency stats, the semantic cache and the usage outbox stay per instance. Not benchmarked with several instances yet. |
 | Per-deployment breakers | Breakers are per provider (endpoint + credential). A model-specific outage on one endpoint opens it for all its models. Split when that is observed. |
 | Bulk user erasure | Per-conversation delete exists; add a user-level erase if a retention/GDPR policy requires it. |
 | Alert delivery, off-host backups, retention schedule, TLS domains | Procedures and tooling exist ([OPERATIONS.md](OPERATIONS.md)); **external input** needed: receivers, backup destination/key, retention periods, DNS. |
@@ -204,8 +213,8 @@ that needs the database returns `503 database unavailable` with
 | --- | --- | --- |
 | One modular FastAPI process | Small footprint, clear modules | Independent scaling/failure isolation has measured value |
 | PostgreSQL for teams; SQLite for development | Durable relational records, no extra service type | Measured workload demands otherwise |
-| Local limiter/cache/breakers | Correct for one instance | More than one instance is required |
-| Exact-match cache off by default | No semantic mismatch | Representative traffic shows a safe hit rate |
+| Local breakers and semantic cache, Redis for the rest when set | Health is learned per instance; semantic cache needs no vector store | Breaker flapping across instances, or semantic cache too large for memory |
+| Exact-match cache off by default; semantic cache opt-in per alias | No silent wrong answers by default | Representative traffic shows a safe hit rate |
 | Inline summaries and JSON repair | Simpler operation | Tail latency or reliability warrants durable jobs |
 | Own provider adapters | Small provider set | Maintenance cost justifies a translation library |
 | Basic auth on operator UIs via Caddy | No extra service | SSO is required |

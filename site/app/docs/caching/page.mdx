@@ -1,0 +1,69 @@
+export const metadata = { title: "Caching" };
+
+# Caching
+
+TwinLM answers **identical deterministic requests** from an in-memory cache. A cache hit costs nothing, returns in
+milliseconds, and never reaches the provider. FAQ bots, classifiers, extraction jobs and client retries repeat
+themselves far more than people expect.
+
+## What gets cached
+
+A request is cached only when **all** of these hold:
+
+- it is **stateless** (no `conversation_id`);
+- it is **not streamed**;
+- `temperature` is **unset or 0** (sampled requests are meant to vary, so they always go to the model);
+- it has **no tools** and is not a tool-call turn;
+- the guardrails found **no secrets or PII** in the input, and none were generated in the output;
+- its alias doesn't set `cache_ttl_seconds = 0`.
+
+The cache key is a SHA-256 of the model, messages, sampling parameters, response format **and the caller's
+project**, so answers never cross projects.
+
+## Configuration
+
+```toml
+[cache]
+enabled = true            # on in the shipped gateway.toml (the code default is off)
+ttl_seconds = 300         # default lifetime of an entry
+max_entries = 1000        # LRU: least recently used entries go first
+max_bytes = 16777216      # 16 MiB cap on cached responses
+
+[models.faq]
+targets = ["groq/openai/gpt-oss-20b"]
+cache_ttl_seconds = 3600  # this alias keeps answers for an hour
+
+[models.live-prices]
+targets = ["gemini"]
+cache_ttl_seconds = 0     # never cache this alias
+```
+
+## Seeing it work
+
+Every response carries an `X-Cache: HIT` or `X-Cache: MISS` header. In the OpenAI Python SDK:
+
+```python
+raw = client.chat.completions.with_raw_response.create(model="auto", temperature=0, messages=messages)
+print(raw.headers.get("x-cache"))
+```
+
+Usage reports count `cache_hits` and `cache_hit_rate`; hits are logged at zero cost, and the
+[savings report](/docs/usage-and-savings/#savings-report) values them as `cache_avoided_usd`.
+
+## Clearing it
+
+```bash
+curl -X DELETE http://localhost:8000/admin/cache -H "Authorization: Bearer $ADMIN_TOKEN"
+# {"cleared": 42}
+```
+
+The cache also empties when the gateway restarts.
+
+## Limits
+
+- **Exact match only.** "What's your refund policy?" and "what is your refund policy" are different entries.
+  There is no semantic cache.
+- **In process.** Each gateway instance has its own cache.
+- **Provider-side prompt caching** (discounts some providers give for repeated prompt prefixes) is separate.
+  Automatic prompt caching, such as OpenAI's, still applies to requests that pass through. TwinLM doesn't forward
+  provider-specific cache-control parameters.

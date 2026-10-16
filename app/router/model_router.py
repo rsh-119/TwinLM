@@ -21,8 +21,8 @@ propagate unchanged. A total deadline bounds the whole thing.
 import asyncio
 import logging
 import math
+import os
 import time
-from functools import lru_cache
 from typing import (
     Any,
     AsyncIterator,
@@ -627,8 +627,25 @@ class ModelRouter:
 # ---- construction from gateway config --------------------------------------
 
 
-def build_provider(name: str, config: ProviderConfig, settings: Settings) -> LLMProvider:
-    api_key = getattr(settings, config.api_key_setting) if config.api_key_setting else ""
+def provider_api_key(settings: Settings, setting: Optional[str]) -> str:
+    """A provider's key: a Settings field (gemini_api_key, ...) or, for any
+    other provider, the environment variable of that name (DEEPSEEK_API_KEY
+    for "deepseek_api_key"), also read from .env."""
+    if not setting:
+        return ""
+    value = getattr(settings, setting, None)
+    if value is None:
+        value = os.environ.get(setting.upper()) or (settings.model_extra or {}).get(setting.lower(), "")
+    return value
+
+
+def build_provider(
+    name: str, config: ProviderConfig, settings: Settings, api_key: Optional[str] = None
+) -> LLMProvider:
+    """`api_key` is given for providers added from the admin panel (decrypted
+    from the database); gateway.toml providers read it via api_key_setting."""
+    if api_key is None:
+        api_key = provider_api_key(settings, config.api_key_setting)
     if config.type == "gemini":
         provider: LLMProvider = GeminiProvider(
             api_key=api_key,
@@ -647,7 +664,8 @@ def build_provider(name: str, config: ProviderConfig, settings: Settings) -> LLM
             api_key=api_key,
             default_model=config.default_model,
             timeout_seconds=config.timeout_seconds,
-            require_api_key=bool(config.api_key_setting),
+            require_api_key=bool(config.api_key_setting or api_key),
+            auth_header=config.auth_header,
         )
     return MockProvider(
         name=name,
@@ -657,9 +675,12 @@ def build_provider(name: str, config: ProviderConfig, settings: Settings) -> LLM
     )
 
 
-def build_router(config: GatewayConfig, settings: Settings) -> ModelRouter:
+def build_router(
+    config: GatewayConfig, settings: Settings, provider_keys: Optional[Dict[str, str]] = None
+) -> ModelRouter:
+    keys = provider_keys or {}
     enabled = {name: cfg for name, cfg in config.providers.items() if cfg.enabled}
-    providers = {name: build_provider(name, cfg, settings) for name, cfg in enabled.items()}
+    providers = {name: build_provider(name, cfg, settings, keys.get(name)) for name, cfg in enabled.items()}
     capabilities = {
         name: frozenset(cfg.capabilities) if cfg.capabilities is not None else DEFAULT_CAPABILITIES[cfg.type]
         for name, cfg in enabled.items()
@@ -712,6 +733,35 @@ def build_router(config: GatewayConfig, settings: Settings) -> ModelRouter:
     )
 
 
-@lru_cache
+# The live router. Built from gateway.toml on first use, then replaced in
+# place by app.gateway.runtime when providers, aliases or prices change in
+# the admin panel - no restart. In-flight requests finish on the router they
+# started with.
+_router: Optional[ModelRouter] = None
+
+
 def get_model_router() -> ModelRouter:
-    return build_router(get_gateway_config(), get_settings())
+    global _router
+    if _router is None:
+        _router = build_router(get_gateway_config(), get_settings())
+    return _router
+
+
+def swap_router(new: ModelRouter) -> Optional[ModelRouter]:
+    """Install `new`, carrying over circuit-breaker state for providers that
+    still exist; returns the old router (the caller closes it later)."""
+    global _router
+    old = _router
+    if old is not None:
+        for name, health in old.health.items():
+            if name in new.health:
+                new.health[name] = health
+    _router = new
+    return old
+
+
+def reset_router() -> Optional[ModelRouter]:
+    """Forget the live router (shutdown, tests); returns it for closing."""
+    global _router
+    old, _router = _router, None
+    return old

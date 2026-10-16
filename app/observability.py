@@ -65,6 +65,7 @@ GUARDRAIL_VIOLATIONS = Counter(
 STRUCTURED_OUTPUT_FAILURES = Counter(
     "llm_structured_output_failures_total", "Responses that failed JSON/schema validation"
 )
+BUDGET_ALERTS = Counter("llm_budget_alerts_total", "Budget threshold alerts sent", ["threshold"])
 RATE_LIMITED = Counter("llm_rate_limited_total", "Requests rejected by rate limits", ["reason"])
 
 # ---- request context -------------------------------------------------------

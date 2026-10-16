@@ -1,0 +1,122 @@
+@import "tailwindcss";
+
+/* One paper, one ink, one colour. International Orange is the only hue on
+   the page and it is spent at page scale (the savings spread) or on money. */
+@theme {
+  --color-paper: #ffffff;
+  --color-paper-2: #f2f2f2;
+  --color-ink: #111111;
+  --color-ink-2: #4a4a46;
+  --color-rule: #d9d8d2;
+  --color-signal: #ff4f00;
+  --color-signal-ink: #b83800; /* orange text on white at body sizes */
+  --color-on-signal: #1a0a00;
+
+  --font-sans: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
+  --font-code: var(--font-code), ui-monospace, Consolas, monospace;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 5rem;
+  }
+  body {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "tnum" 1, "lnum" 1;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: var(--color-signal);
+    color: var(--color-on-signal);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-signal);
+    outline-offset: 3px;
+  }
+  a {
+    text-underline-offset: 0.2em;
+    text-decoration-thickness: 1px;
+  }
+  input[type="range"] {
+    accent-color: var(--color-ink);
+  }
+  html {
+    scrollbar-color: var(--color-ink) var(--color-paper-2);
+  }
+  /* grid items default to min-width:auto and grow to the widest code line */
+  .grid > * {
+    min-width: 0;
+  }
+  details > summary {
+    list-style: none;
+  }
+  details > summary::-webkit-details-marker {
+    display: none;
+  }
+}
+
+@layer utilities {
+  /* Archivo's width axis: condensed for figures, normal for prose */
+  .figure {
+    font-variation-settings: "wdth" 62;
+    font-weight: 800;
+    letter-spacing: -0.035em;
+    line-height: 0.82;
+  }
+  .display {
+    font-variation-settings: "wdth" 88;
+    font-weight: 750;
+    letter-spacing: -0.03em;
+    line-height: 0.98;
+    text-wrap: balance;
+  }
+  .label {
+    font-variation-settings: "wdth" 100;
+    font-weight: 600;
+    font-size: 0.8125rem;
+    letter-spacing: 0.01em;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* Range sliders drawn as report scales */
+.scale {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 28px;
+  background: transparent;
+  cursor: pointer;
+}
+.scale::-webkit-slider-runnable-track {
+  height: 2px;
+  background: var(--color-ink);
+}
+.scale::-moz-range-track {
+  height: 2px;
+  background: var(--color-ink);
+}
+.scale::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 22px;
+  margin-top: -10px;
+  background: var(--color-signal);
+  border: 2px solid var(--color-ink);
+}
+.scale::-moz-range-thumb {
+  width: 12px;
+  height: 20px;
+  border-radius: 0;
+  background: var(--color-signal);
+  border: 2px solid var(--color-ink);
+}

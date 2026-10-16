@@ -1,0 +1,62 @@
+export const metadata = { title: "Introduction" };
+
+# TwinLM documentation
+
+TwinLM is a small, self-hosted, **OpenAI-compatible LLM gateway** that cuts AI spend. Your applications keep
+using the OpenAI SDK (or LangChain, LlamaIndex, anything that speaks the OpenAI API). You change two lines,
+`base_url` and `api_key`, and every request now goes through TwinLM, which:
+
+- sends each use case to the **cheapest model that is good enough**, and falls back to another provider when one is down;
+- answers **repeated requests from cache** for $0;
+- **caps output tokens** so one bad prompt can't run up a bill;
+- records **tokens and cost per app, team and model**, and reports **how much you saved** against the model you would otherwise use.
+
+It runs on your own server or cloud. Prompts go only to the providers you configure, with your own provider keys.
+
+## How it works
+
+```text
+Your apps (chatbot, support tool, scripts, agents)
+   |  OpenAI-style requests, one TwinLM key per app
+   v
+TwinLM gateway
+   auth and limits -> cache -> router (aliases, fallback,
+   retries, breakers) -> provider -> usage and cost record
+   |
+   v
+OpenAI, Gemini, Groq, DeepSeek, Mistral, Ollama, vLLM, ...
+```
+
+A request names a **model alias** such as `auto`, `fast` or `smart`. You decide in one config file,
+[`gateway.toml`](/docs/config/), which real models sit behind each alias and in what order. Apps never
+hard-code a provider, so you can switch to a cheaper model without redeploying anything.
+
+## What's in the box
+
+| Core (kept small and well tested) | Optional (works, not the focus) |
+| --- | --- |
+| OpenAI-compatible `/v1/chat/completions`, `/v1/embeddings`, `/v1/models`, with streaming, tools and vision | Gateway-owned [conversations and memories](/docs/stateful/) |
+| [Keys per app or team](/docs/keys/) with rate limits and a daily spend limit | [Guardrails](/docs/guardrails/) (secrets, PII, prompt injection) |
+| [Teams and members](/docs/teams/): console sign-in, roles, keys and spend per team | |
+| Providers and models added from the console, live, with **day-zero models** and **your own models** | |
+| [Usage and cost](/docs/usage-and-savings/) per key, project, provider and model | [Structured output](/docs/guardrails/#structured-output) validation and repair |
+| [Aliases, routing and fallback](/docs/routing/) with retries and circuit breakers | |
+| [Exact-match cache](/docs/caching/) for deterministic requests | |
+| [Output-token caps](/docs/output-caps/) | |
+| [Savings report](/docs/usage-and-savings/#savings-report) against a baseline model | |
+
+## Where to start
+
+- **Just trying it?** Follow the [Quickstart](/docs/quickstart/): one command, then your first request in about five minutes.
+- **Putting it in front of real apps?** Read [Deployment](/docs/deploy/), then [Integrate your apps](/docs/integrate/).
+- **Configuring models and prices?** See [Providers](/docs/providers/) and the [gateway.toml reference](/docs/config/).
+- **Running it for a team?** The [Operations runbook](/docs/operations/) covers backups, upgrades and key rotation.
+
+## Honest limits
+
+<Note title="Know before you deploy">
+One gateway instance is the supported setup: rate limits, circuit breakers and the cache live in process memory.
+The daily budget is advisory (concurrent requests can overshoot it); use your provider's spend limits as the hard
+stop. Costs are estimates from the prices you configure. There is no SSO, no semantic cache and no `n > 1`.
+Details: [Performance and limits](/docs/performance/).
+</Note>

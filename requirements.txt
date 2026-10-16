@@ -13,3 +13,6 @@ pygments
 prometheus-client
 jsonschema
 psycopg[binary]
+cryptography
+numpy
+redis

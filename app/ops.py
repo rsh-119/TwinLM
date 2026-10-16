@@ -5,6 +5,7 @@ DATABASE_URL / USAGE_SPOOL_PATH):
     python -m app.ops verify                  schema version + row counts (restore drills)
     python -m app.ops retention --request-logs-days 90 --conversations-days 365 [--memories-days N] [--dry-run]
     python -m app.ops outbox status|list|reconcile|requeue|export FILE
+    python -m app.ops create-admin --email you@company.com --name "Your Name"   first console admin
 
 Procedures that use these are in docs/OPERATIONS.md.
 """
@@ -108,6 +109,25 @@ def outbox(action: str, path=None) -> int:
     return 0
 
 
+def create_admin(email: str, name: str) -> int:
+    """A console admin with a temporary password (printed once)."""
+    from app.console_auth import hash_password, temporary_password
+    from app.database.models import User
+
+    database.init_db(apply=get_settings().migrate_on_startup)
+    with database.SessionLocal() as db:
+        email = email.strip().lower()
+        if db.query(User).filter(User.email == email).first():
+            print(f"{email} already exists", file=sys.stderr)
+            return 1
+        password = temporary_password()
+        db.add(User(email=email, name=name, role="admin", password_hash=hash_password(password),
+                    must_change_password=True))
+        db.commit()
+    print(f"admin {email} created. Temporary password (change it at first sign-in): {password}")
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.ops", description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
@@ -121,12 +141,17 @@ def main(argv=None) -> int:
     outbox_cmd = commands.add_parser("outbox")
     outbox_cmd.add_argument("action", choices=["status", "list", "reconcile", "requeue", "export"])
     outbox_cmd.add_argument("path", nargs="?")
+    admin_cmd = commands.add_parser("create-admin")
+    admin_cmd.add_argument("--email", required=True)
+    admin_cmd.add_argument("--name", default="Admin")
     args = parser.parse_args(argv)
 
     if args.command == "migrate":
         return migrate(args.check)
     if args.command == "verify":
         return verify()
+    if args.command == "create-admin":
+        return create_admin(args.email, args.name)
     if args.command == "retention":
         days = (args.request_logs_days, args.conversations_days, args.memories_days)
         if any(d is not None and d < 1 for d in days):

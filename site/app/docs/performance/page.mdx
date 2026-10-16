@@ -1,0 +1,50 @@
+export const metadata = { title: "Performance and limits" };
+
+# Performance and limits
+
+These numbers come from one benchmark run on one machine with **mock providers**. They show the gateway's own
+overhead and where it saturates, not what you will get with real providers, whose latency and quotas dominate.
+
+## Benchmark (14 October 2026)
+
+Setup: Windows 11, 4 logical CPUs; Docker Desktop VM with 4 CPUs and 3.7 GiB; one gateway container (one uvicorn
+worker, Python 3.11) with PostgreSQL 16, auth and the usage outbox on; the load generator on the same host.
+
+| Measure | Result |
+| --- | --- |
+| Idle memory | Gateway 76 MiB, PostgreSQL 33–69 MiB |
+| Cold start to ready (fresh volumes) | 13–16 s |
+| Gateway-added latency (0 ms mock provider) | p50 10.1 ms, p95 18.8 ms, p99 27.1 ms |
+
+Concurrency with a 50 ms mock provider:
+
+| Users | RPS | p50 | p95 | Errors |
+| --- | --- | --- | --- | --- |
+| 1 | 13.9 | 65 ms | 99 ms | 0% |
+| 10 | 77.4 | 122 ms | 187 ms | 0% |
+| 50 | 105.2 | 432 ms | 739 ms | 0% |
+| 100 | 122.3 | 762 ms | 1,126 ms | 0% |
+
+The ceiling is about **95–125 requests per second** for one worker on that host; beyond it, latency is queueing.
+
+Failure behaviour in the same run:
+
+- **Provider outage:** all 1,022 requests succeeded; the failing provider's circuit opened after 7 failed attempts
+  and traffic moved to the fallback.
+- **10-second database outage:** 0 failed stateless requests out of 2,469. Afterwards every request had exactly one
+  usage record (8,700 of 8,700).
+
+Reproduce with `python loadtest/bench.py --users 1 10 50 100 --duration 15` (needs Docker; runs in its own
+throwaway Compose project).
+
+## Known limits
+
+- **One gateway instance.** Rate-limit windows, circuit breakers and the cache are in process memory. Running
+  several instances would multiply the limits and split the cache. Shared state is needed first.
+- **The daily budget is advisory.** Concurrent requests and unknown prices can exceed it.
+- **No SSO.** A user's identity is which key they hold.
+- **Not implemented:** `n > 1`, semantic caching, batch or queued execution, OpenTelemetry tracing, bulk user
+  erasure.
+- **Tools and images are stateless-only.** Falling back between providers mid tool-conversation works, but tool-call
+  ids don't carry over.
+- **Gemini embeddings report no token usage,** so their tokens and cost are recorded as unknown.

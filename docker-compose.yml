@@ -2,9 +2,10 @@
 # PostgreSQL, and one-shot secret generation.
 #
 #   docker compose up -d --build                                   # gateway + database
-#   docker compose --profile console up -d                         # + Streamlit test console
 #   docker compose --profile monitoring up -d                      # + Prometheus (with alert rules) + Grafana
-#   docker compose --profile ingress --profile console up -d       # + Caddy TLS ingress (see docs/OPERATIONS.md)
+#   docker compose --profile ingress up -d                         # + Caddy TLS ingress (see docs/OPERATIONS.md)
+#
+# The web console is part of the gateway: http://localhost:8000/app
 #
 # - Secrets (admin token, Postgres, Grafana and console passwords) are
 #   generated randomly on first start into the `secrets` volume and reused.
@@ -27,7 +28,7 @@ services:
       - sh
       - -c
       - |
-        for name in postgres_password admin_token grafana_password console_password; do
+        for name in postgres_password admin_token grafana_password console_password provider_keys_secret; do
           [ -s /secrets/$$name ] || tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 40 > /secrets/$$name
         done
         chmod 444 /secrets/*
@@ -47,6 +48,8 @@ services:
       # gateway python -m app.ops ...` reaches the same database
       DATABASE_URL: postgresql+psycopg://twinlm@postgres:5432/twinlm
       DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
+      # encrypts provider API keys added from the admin console
+      PROVIDER_KEYS_SECRET_FILE: /run/secrets/provider_keys_secret
     volumes:
       - ${GATEWAY_CONFIG_FILE:-./gateway.toml}:/app/gateway.toml:ro
       - secrets:/run/secrets:ro
@@ -82,18 +85,6 @@ services:
     depends_on:
       secrets:
         condition: service_completed_successfully
-    restart: unless-stopped
-
-  ui:
-    profiles: [console]
-    build: ./ui
-    environment:
-      GATEWAY_URL: http://gateway:8000
-    ports:
-      - "${UI_BIND:-127.0.0.1}:${UI_PORT:-8501}:8501"
-    depends_on:
-      gateway:
-        condition: service_healthy
     restart: unless-stopped
 
   prometheus:
