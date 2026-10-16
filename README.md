@@ -545,6 +545,10 @@ limits and the cache fail open (requests are served, unlimited and uncached)
 and the gateway logs it; Redis is skipped for 10 s after an error so an outage
 doesn't slow requests down.
 
+To try it on one machine, `loadtest/compose.scale.yml` adds Redis, a second gateway and a Caddy load
+balancer to the Compose stack: `docker compose -f docker-compose.yml -f loadtest/compose.scale.yml up -d`.
+`python loadtest/bench.py --instances 2` benchmarks that setup.
+
 ## Testing
 
 ```bash

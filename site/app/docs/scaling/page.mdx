@@ -14,6 +14,13 @@ behind a load balancer when you need more capacity, or so one can restart while 
 
 The startup log shows `shared_state=redis` when Redis is in use.
 
+To try it on one machine, the repository's `loadtest/compose.scale.yml` adds Redis, a second gateway and a Caddy
+load balancer to the Compose stack:
+
+```bash
+docker compose -f docker-compose.yml -f loadtest/compose.scale.yml up -d
+```
+
 ## What is shared
 
 | With `REDIS_URL` | Effect |
