@@ -21,6 +21,7 @@ from app.database.models import AliasOverride, PriceOverride, ProviderConfigRow
 from app.gateway import runtime, secret_box
 from app.gateway.config import Capability, ProviderConfig
 from app.gateway.presets import PRESETS
+from app.providers.gemini import GEMINI_API_BASE
 from app.router.model_router import build_provider, get_model_router
 
 router = APIRouter(prefix="/admin/config", tags=["admin"], dependencies=[Depends(require_admin)])
@@ -212,17 +213,25 @@ async def delete_provider(
 
 
 async def _live_models(cfg: ProviderConfig, api_key: str) -> List[str]:
-    """The provider's own model list (OpenAI-compatible GET /models), so the
-    panel offers models that exist today. Empty when unsupported."""
-    if cfg.type != "openai_compatible" or not cfg.base_url:
-        return []
+    """The provider's own model list (OpenAI-compatible GET /models, or
+    Gemini's), so the panel offers models that exist today for this key.
+    Empty when unsupported."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
+            if cfg.type == "gemini" and api_key:
+                base = (cfg.base_url or GEMINI_API_BASE).rstrip("/")
+                response = await client.get(f"{base}/models", params={"pageSize": 1000},
+                                            headers={"x-goog-api-key": api_key})
+                models = response.json().get("models", []) if response.status_code == 200 else []
+                return sorted(m["name"].removeprefix("models/") for m in models if isinstance(m, dict)
+                              and "generateContent" in m.get("supportedGenerationMethods", []))[:300]
+            if cfg.type != "openai_compatible" or not cfg.base_url:
+                return []
             auth = {"api-key": api_key} if cfg.auth_header == "api-key" else {"Authorization": f"Bearer {api_key}"}
             response = await client.get(f"{cfg.base_url.rstrip('/')}/models", headers=auth if api_key else {})
         data = response.json().get("data", []) if response.status_code == 200 else []
         return sorted(m["id"] for m in data if isinstance(m, dict) and isinstance(m.get("id"), str))[:300]
-    except (httpx.HTTPError, ValueError, AttributeError):
+    except (httpx.HTTPError, ValueError, AttributeError, KeyError):
         return []
 
 
