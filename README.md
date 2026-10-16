@@ -551,6 +551,7 @@ doesn't slow requests down.
 pip install -r requirements-dev.txt  # or the hash-locked requirements-dev.lock (Linux/Python 3.11)
 python -m pytest                     # offline suite incl. OpenAI SDK contract tests
 TEST_DATABASE_URL=postgresql+psycopg://... python -m pytest   # + PostgreSQL migrations/integration (DISPOSABLE database only)
+REDIS_TEST_URL=redis://localhost:6379/0 python -m pytest   # shared-state tests on a real Redis (DISPOSABLE: flushed)
 python scripts/codebase_graph.py     # codebase graph is current
 python loadtest/bench.py             # whole-stack benchmark in a throwaway Compose project
 python scripts/demo.py               # end-to-end demo against real providers (needs keys)
