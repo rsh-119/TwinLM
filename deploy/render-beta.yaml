@@ -17,6 +17,7 @@ services:
     image:
       url: ghcr.io/rsh-119/twinlm:latest
     plan: free
+    region: ohio                         # next to the Neon database (AWS us-east-2)
     healthCheckPath: /ready
     envVars:
       - key: PORT

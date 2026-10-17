@@ -20,7 +20,7 @@ on free tiers; each sign-up gets their own team (as its admin), API keys and a m
 
 ## 1. Database (Neon)
 
-Create a Neon project `twinlm-beta` (region close to Render's, e.g. US East). Copy its **direct** connection
+Create a Neon project `twinlm-beta` in AWS us-east-2 (the blueprint runs on Render in Ohio, next to it). Copy its **direct** connection
 string (not the "pooled" one: migrations take a database lock that connection pooling can break), e.g.
 `postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require`.
 
