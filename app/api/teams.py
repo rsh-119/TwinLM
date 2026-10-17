@@ -37,6 +37,7 @@ console_router = APIRouter(prefix="/console", tags=["console"])
 
 TEAM_NAME = r"^[a-z0-9][a-z0-9_.-]{0,39}$"
 LOGIN_ATTEMPTS_PER_MINUTE = 10
+SIGNUPS_PER_MINUTE_PER_IP = 3
 
 
 def _now() -> datetime:
@@ -129,8 +130,63 @@ class SetupIn(BaseModel):
 
 @auth_router.get("/setup")
 def setup_status(db: Session = Depends(get_db)) -> dict:
-    """First run: nobody can sign in until the first admin exists."""
-    return {"needs_setup": db.query(User).count() == 0}
+    """First run: nobody can sign in until the first admin exists. Also
+    whether visitors may create an account (hosted beta)."""
+    settings = get_settings()
+    users = db.query(User).count()
+    return {"needs_setup": users == 0, "signup_enabled": settings.signup_enabled and users > 0,
+            "signup_full": users >= settings.signup_max_accounts}
+
+
+class SignupIn(BaseModel):
+    email: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=200)
+    name: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=8, max_length=200)
+    team: str = Field(pattern=TEAM_NAME)
+
+
+def _beta_full(db: Session) -> bool:
+    """With sign-up on, the account cap covers every console user."""
+    settings = get_settings()
+    return settings.signup_enabled and db.query(User).count() >= settings.signup_max_accounts
+
+
+@auth_router.post("/signup", status_code=201)
+def signup(body: SignupIn, request: Request, response: Response, db: Session = Depends(get_db),
+           services: GatewayServices = Depends(get_services)) -> dict:
+    """Hosted beta: create an account, a team the new user administers and
+    the team's monthly budget, then sign them in. Opens only after the first
+    admin exists, so the operator always holds the admin account."""
+    settings = get_settings()
+    if not settings.signup_enabled or not db.query(User).count():
+        raise HTTPException(status_code=404, detail="sign-up is not open")
+    client = request.client.host if request.client else "?"
+    if get_rate_limiter().acquire(f"signup-ip:{client}", SIGNUPS_PER_MINUTE_PER_IP, None):
+        raise HTTPException(status_code=429, detail="too many sign-ups from here - wait a minute",
+                            headers={"Retry-After": "60"})
+    if _beta_full(db):
+        raise HTTPException(status_code=403, detail="the beta is full - try again later")
+    email = body.email.strip().lower()
+    if body.team == DEFAULT_PROJECT:
+        raise HTTPException(status_code=400, detail=f"{DEFAULT_PROJECT!r} is reserved")
+    if db.query(User).filter(User.email == email).first():
+        raise HTTPException(status_code=409, detail="an account with this email exists - sign in instead")
+    # a project used by admin-created keys counts as taken too: its usage isn't the newcomer's
+    if db.query(Team).filter(Team.name == body.team).first() or \
+            db.query(ApiKey).filter(ApiKey.project == body.team).first():
+        raise HTTPException(status_code=409, detail="this team name is taken - choose another")
+    user = User(email=email, name=body.name.strip(), role="member", password_hash=hash_password(body.password),
+                must_change_password=False)
+    team = Team(name=body.team)
+    db.add_all([user, team])
+    db.flush()
+    db.add_all([TeamMember(team_id=team.id, user_id=user.id, role="admin"),
+                Budget(scope="team", target=team.name, period="monthly", limit_usd=settings.signup_team_budget_usd)])
+    db.commit()
+    services.budgets.invalidate()
+    token = create_session(db, user)
+    set_session_cookie(response, request, token)
+    return {"token": token, "user": _user_view(user), "team": {"id": team.id, "name": team.name}}
 
 
 @auth_router.post("/setup")
@@ -341,6 +397,8 @@ def add_member(team_id: str, body: MemberIn, current: ConsoleUser = Depends(read
     user = db.query(User).filter(User.email == email).first()
     out: dict = {}
     if user is None:
+        if not current.is_admin and _beta_full(db):
+            raise HTTPException(status_code=403, detail="the beta is full - no new accounts can be added")
         out["temporary_password"] = temporary_password()
         user = User(email=email, name=(body.name or email.split("@")[0]).strip(), role="member",
                     password_hash=hash_password(out["temporary_password"]), must_change_password=True)
@@ -413,7 +471,7 @@ def team_keys(team_id: str, current: ConsoleUser = Depends(ready_user), db: Sess
 
 @console_router.post("/teams/{team_id}/keys", status_code=201)
 def create_team_key(team_id: str, body: TeamKeyIn, current: ConsoleUser = Depends(ready_user),
-                    db: Session = Depends(get_db)) -> dict:
+                    db: Session = Depends(get_db), services: GatewayServices = Depends(get_services)) -> dict:
     team = _team(db, team_id, current)
     is_team_admin = current.team_role(team.id) == "admin"
     owner = current.user.id if body.for_user == "me" else body.for_user
@@ -422,14 +480,25 @@ def create_team_key(team_id: str, body: TeamKeyIn, current: ConsoleUser = Depend
     if owner and owner != current.user.id and not db.query(TeamMember).filter(
             TeamMember.team_id == team.id, TeamMember.user_id == owner).first():
         raise HTTPException(status_code=400, detail="that user is not a member of this team")
+    rpm, tpm = body.rpm_limit, body.tpm_limit
+    if not current.is_admin:
+        # only org admins may give a key more than the gateway's default limits
+        defaults = services.config.rate_limits
+        rpm = _at_most(rpm, defaults.default_rpm)
+        tpm = _at_most(tpm, defaults.default_tpm)
     raw, key_hash = generate_key()
     key = repository.create_api_key(
         db, name=body.name, project=team.name, key_hash=key_hash, key_prefix=raw[:14],
         allowed_models=json.dumps(body.allowed_models) if body.allowed_models is not None else None,
-        rpm_limit=body.rpm_limit, tpm_limit=body.tpm_limit, daily_budget_usd=body.daily_budget_usd,
+        rpm_limit=rpm, tpm_limit=tpm, daily_budget_usd=body.daily_budget_usd,
         user_id=owner, created_by=current.user.id,
     )
     return {**_key_view(key), "key": raw}
+
+
+def _at_most(value: Optional[int], ceiling: Optional[int]) -> Optional[int]:
+    """`value` capped at `ceiling`; unset stays unset (the default then applies)."""
+    return min(value, ceiling) if value is not None and ceiling is not None else value
 
 
 @console_router.delete("/teams/{team_id}/keys/{key_id}")
