@@ -59,7 +59,52 @@ function ErrorNote({ error }: { error: string }) {
   );
 }
 
-function SignInForm({ onDone }: { onDone: (me: Me) => void }) {
+type Setup = { needs_setup: boolean; signup_enabled?: boolean; signup_full?: boolean };
+
+function SwitchLink({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+  return <button type="button" onClick={onClick} className="font-medium text-brand hover:underline">{children}</button>;
+}
+
+function SignUpForm({ onDone, onSignIn, full }: { onDone: () => void; onSignIn: () => void; full: boolean }) {
+  const [form, setForm] = useState({ name: "", email: "", team: "", password: "" });
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [k]: e.target.value });
+  const { busy, error, submit } = useSubmit(async () => {
+    await post("/auth/signup", form);
+    onDone();
+  });
+  return (
+    <form onSubmit={submit} className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Create your account</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Free beta: your own team, an API key and a monthly budget on free models. No card needed.
+        </p>
+      </div>
+      {full ? (
+        <Alert><AlertDescription>The beta is full right now. Check back soon.</AlertDescription></Alert>
+      ) : (
+        <>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field id="su-name" label="Your name" required value={form.name} onChange={set("name")} autoComplete="name" autoFocus />
+            <Field id="su-email" label="Email" type="email" required value={form.email} onChange={set("email")} autoComplete="email" />
+          </div>
+          <Field id="su-team" label="Team name" required pattern="[a-z0-9][a-z0-9_.\-]{0,39}" value={form.team}
+            onChange={(e) => setForm({ ...form, team: e.target.value.toLowerCase() })}
+            hint="Lowercase letters, digits, dots, dashes. Your usage and keys live under it, e.g. acme." />
+          <Field id="su-password" label="Password" type="password" required minLength={8} value={form.password}
+            onChange={set("password")} autoComplete="new-password" hint="At least 8 characters." />
+          <ErrorNote error={error} />
+          <SubmitButton busy={busy}>Create account</SubmitButton>
+        </>
+      )}
+      <p className="text-center text-sm text-muted-foreground">
+        Already have an account? <SwitchLink onClick={onSignIn}>Sign in</SwitchLink>
+      </p>
+    </form>
+  );
+}
+
+function SignInForm({ onDone, onSignUp }: { onDone: (me: Me) => void; onSignUp?: () => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const { busy, error, submit } = useSubmit(async () => {
@@ -81,6 +126,11 @@ function SignInForm({ onDone }: { onDone: (me: Me) => void }) {
       <p className="text-center text-xs text-muted-foreground">
         Forgot your password? Ask a team admin to reset it.
       </p>
+      {onSignUp && (
+        <p className="text-center text-sm text-muted-foreground">
+          New here? <SwitchLink onClick={onSignUp}>Create a free account</SwitchLink>
+        </p>
+      )}
     </form>
   );
 }
@@ -138,7 +188,7 @@ function PasswordForm({ onDone }: { onDone: () => void }) {
   );
 }
 
-function BrandPanel() {
+function BrandPanel({ hosted }: { hosted: boolean }) {
   return (
     <div className="relative hidden flex-col justify-between overflow-hidden bg-zinc-950 p-10 text-zinc-50 lg:flex">
       <Logo className="text-lg text-zinc-50" />
@@ -160,7 +210,10 @@ function BrandPanel() {
         </div>
       </div>
       <p className="flex items-center gap-2 text-xs text-zinc-400">
-        <ShieldCheck className="size-4" /> Self-hosted. Your prompts and keys stay on your infrastructure.
+        <ShieldCheck className="size-4" />
+        {hosted
+          ? "Hosted beta. Prompts are not stored; self-host to keep everything on your own infrastructure."
+          : "Self-hosted. Your prompts and keys stay on your infrastructure."}
       </p>
       <div className="pointer-events-none absolute -right-24 -top-24 size-80 rounded-full bg-brand/25 blur-3xl" aria-hidden />
     </div>
@@ -171,8 +224,11 @@ function SignInFlow() {
   const router = useRouter();
   const qc = useQueryClient();
   const params = useSearchParams();
-  const setup = useQuery({ queryKey: ["setup"], queryFn: () => get<{ needs_setup: boolean }>("/auth/setup") });
-  const [step, setStep] = useState<"password" | null>(params.get("step") === "password" ? "password" : null);
+  const setup = useQuery({ queryKey: ["setup"], queryFn: () => get<Setup>("/auth/setup") });
+  const [step, setStep] = useState<"password" | "signup" | null>(
+    params.get("step") === "password" ? "password" : params.has("signup") ? "signup" : null,
+  );
+  const canSignUp = !!setup.data?.signup_enabled;
 
   const enter = async () => {
     qc.removeQueries();
@@ -184,11 +240,16 @@ function SignInFlow() {
   else if (setup.error instanceof ApiError) content = <ErrorNote error={`Gateway unreachable: ${setup.error.message}`} />;
   else if (setup.data?.needs_setup) content = <SetupForm onDone={enter} />;
   else if (step === "password") content = <PasswordForm onDone={enter} />;
-  else content = <SignInForm onDone={(me) => (me.must_change_password ? setStep("password") : enter())} />;
+  else if (step === "signup" && canSignUp) {
+    content = <SignUpForm onDone={enter} onSignIn={() => setStep(null)} full={!!setup.data?.signup_full} />;
+  } else {
+    content = <SignInForm onDone={(me) => (me.must_change_password ? setStep("password") : enter())}
+      onSignUp={canSignUp ? () => setStep("signup") : undefined} />;
+  }
 
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
-      <BrandPanel />
+      <BrandPanel hosted={canSignUp} />
       <div className="flex flex-col p-6 sm:p-10">
         <Logo className="lg:hidden" />
         <div className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center py-10">{content}</div>

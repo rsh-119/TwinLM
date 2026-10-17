@@ -88,6 +88,10 @@ const client = new OpenAI({ baseURL: "http://localhost:8000/v1", apiKey: "gw_liv
 const reply = await client.chat.completions.create({ model: "auto", messages: [{ role: "user", content: "Hi" }] });
 ```
 
+**Hosted beta.** `SIGNUP_ENABLED=true` lets visitors create an account from the console's sign-in page: each
+gets their own team, keys and a monthly budget on the models you configure. Free-tier setup (Render + Neon +
+Gemini/Groq free tiers) and operation: [docs/HOSTED_BETA.md](docs/HOSTED_BETA.md).
+
 **Teams and members.** People sign in to the console with email and password; admins, team admins and
 members get keys and spend per team (`docs` → Teams and members). First admin: `python -m app.ops create-admin`.
 

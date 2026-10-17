@@ -1,6 +1,10 @@
 import Link from "next/link";
 
 export const REPO = "https://github.com/rsh-119/TwinLM";
+// The hosted beta's sign-up page; set at build time (repo variable BETA_URL,
+// see docs/HOSTED_BETA.md). Unset = no "Try it free" anywhere on the site.
+const BETA = process.env.NEXT_PUBLIC_BETA_URL?.replace(/\/+$/, "");
+export const TRY_URL = BETA ? `${BETA}/app/sign-in/?signup` : null;
 
 const NAV: [string, string][] = [
   ["Savings", "/#savings"],
@@ -32,10 +36,17 @@ export default function SiteHeader({ wide = false }: { wide?: boolean }) {
           <a href={REPO} className="label hidden text-sm hover:underline sm:inline">
             GitHub
           </a>
-          <Link href="/docs/quickstart/"
-            className="label inline-flex h-10 items-center bg-ink px-4 text-sm text-paper transition-colors hover:bg-signal hover:text-on-signal">
-            Get started
-          </Link>
+          {TRY_URL ? (
+            <a href={TRY_URL}
+              className="label inline-flex h-10 items-center bg-ink px-4 text-sm text-paper transition-colors hover:bg-signal hover:text-on-signal">
+              Try it free
+            </a>
+          ) : (
+            <Link href="/docs/quickstart/"
+              className="label inline-flex h-10 items-center bg-ink px-4 text-sm text-paper transition-colors hover:bg-signal hover:text-on-signal">
+              Get started
+            </Link>
+          )}
         </div>
       </nav>
     </header>

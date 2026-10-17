@@ -1,0 +1,47 @@
+# TwinLM hosted beta on Render's FREE plan, with a free Neon PostgreSQL.
+# Visitors sign up from the console (/app) and get their own team, key and
+# monthly budget on the free models in deploy/gateway.beta.toml.
+#
+# Setup: docs/HOSTED_BETA.md. In short: Render dashboard -> New -> Blueprint,
+# this repo, blueprint path `deploy/render-beta.yaml`; then fill in the three
+# `sync: false` values (Neon URL, Gemini key, Groq key).
+#
+# Free plan: the service sleeps after 15 idle minutes (first request then
+# takes about a minute; .github/workflows/keepalive.yml can ping it) and has
+# no disk, so the usage outbox lives in the container: rows still waiting
+# for the database are lost if the service restarts during a database outage.
+services:
+  - type: web
+    name: twinlm-beta
+    runtime: image
+    image:
+      url: ghcr.io/rsh-119/twinlm:latest
+    plan: free
+    healthCheckPath: /ready
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: GATEWAY_CONFIG_PATH
+        value: deploy/gateway.beta.toml
+      - key: AUTH_ENABLED
+        value: "true"
+      - key: SIGNUP_ENABLED
+        value: "true"
+      - key: SIGNUP_MAX_ACCOUNTS
+        value: "50"
+      - key: SIGNUP_TEAM_BUDGET_USD
+        value: "1.0"
+      - key: STATEFUL_ENABLED            # no conversations stored on the beta
+        value: "false"
+      - key: DB_POOL_SIZE                # Neon free allows few connections
+        value: "5"
+      - key: ADMIN_TOKEN                 # for your first sign-in as the admin
+        generateValue: true
+      - key: PROVIDER_KEYS_SECRET
+        generateValue: true
+      - key: DATABASE_URL                # Neon connection string (postgresql://...)
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false

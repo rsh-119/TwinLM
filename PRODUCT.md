@@ -22,7 +22,7 @@ TwinLM is a small, self-hosted, OpenAI-compatible LLM gateway that reduces AI sp
 
 ## Positioning
 
-A deliberately small core (vs. large gateways like LiteLLM): one OpenAI-compatible adapter plus Gemini, seven cost features, honest accounting (unknown prices stay unknown; savings report says when it is incomplete). Self-hosted: prompts never pass through TwinLM's makers.
+A deliberately small core (vs. large gateways like LiteLLM): one OpenAI-compatible adapter plus Gemini, seven cost features, honest accounting (unknown prices stay unknown; savings report says when it is incomplete). Self-hosted: prompts never pass through TwinLM's makers. The free hosted beta (try-before-install, shared free-tier models, docs/HOSTED_BETA.md) is the one exception and says so.
 
 ## Operating Context
 
@@ -41,7 +41,7 @@ Evaluated by reading the site, then running Docker / Docker Compose (`deploy/qui
 
 ## Brand Commitments
 
-Name: TwinLM. Repo: github.com/rsh-119/TwinLM. Commercial offer: free open source + "Managed setup & support — talk to us" (contact via GitHub issue). No hosted cloud plan exists.
+Name: TwinLM. Repo: github.com/rsh-119/TwinLM. Commercial offer: free open source + "Managed setup & support — talk to us" (contact via GitHub issue). Plus a free hosted beta for trying it (no paid hosted plan yet).
 
 ## Evidence on Hand
 

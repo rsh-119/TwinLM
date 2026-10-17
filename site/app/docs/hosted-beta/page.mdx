@@ -1,0 +1,44 @@
+export const metadata = { title: "Hosted beta" };
+
+# Hosted beta
+
+Try TwinLM without installing anything. The hosted beta is a free, shared TwinLM: sign up, and you get your own
+team, an API key and a monthly budget on free AI models. When the beta is open, the **Try it free** button on the
+[home page](/) takes you to sign-up.
+
+## What you get
+
+- **Your own team**, as its admin. Nobody else sees your keys or usage.
+- **API keys** for your apps: the same OpenAI-compatible API as a self-hosted TwinLM. Change `base_url` and
+  `api_key`, nothing else ([Integrate your apps](/docs/integrate/)).
+- **The console**: the playground, usage per day and per model, keys, and your team's budget.
+- **Free models**: `auto` and `fast` try Groq first and fall back to Gemini; `smart` tries Gemini first. Both use the
+  providers' free tiers.
+- **A monthly budget** (about $1 of list-price usage). Requests that would go over it are refused until the
+  next month.
+
+## Limits
+
+| Limit | Why |
+| --- | --- |
+| About 10 requests and 20,000 tokens per minute per key | The free models' limits are shared by every beta user |
+| Replies up to 1,024 tokens | Keeps every request's worst-case cost inside the budget |
+| No conversations or memories | Nothing you send is stored as text on the beta |
+| May sleep when idle: the first request after a pause can take about a minute | Free hosting |
+| No uptime promise; data may be reset; sign-ups are capped | It's a beta on free tiers |
+| No password reset by email yet | Ask on [GitHub](https://github.com/rsh-119/TwinLM/issues) and we reset it |
+
+## Your data
+
+- Your prompts pass through the beta server to **Groq** or **Google (Gemini)**, the providers that answer them.
+  Free tiers come with the providers' own terms, which may allow them to use free-tier data to improve their
+  services. Don't send anything confidential.
+- TwinLM itself records **request metadata** (time, model, tokens, cost, latency, status), not prompts or replies.
+  Conversations are switched off on the beta.
+- Your email, name and a hashed password are stored for sign-in.
+
+## For real traffic, self-host
+
+The beta is for trying TwinLM. For production, run your own: your prompts then never leave your infrastructure,
+you use your own provider keys and models, and there are no shared limits.
+[Quickstart](/docs/quickstart/) · [Deployment](/docs/deploy/)
