@@ -397,3 +397,24 @@ def test_recommended_model_is_the_lightest_the_key_can_use():
     # every preset starts with its lightest model and marks free tiers
     assert PRESETS["gemini"]["default_model"] == "gemini-3.1-flash-lite" and PRESETS["gemini"]["free_tier"]
     assert PRESETS["xai"]["default_model"] == "grok-3-mini" and not PRESETS["openai"]["free_tier"]
+
+
+async def test_gemini_invalid_key_is_a_credential_error(mock_http):
+    """Gemini rejects a bad key with 400 + API_KEY_INVALID, not 401/403: it
+    must read as a key problem, without passing the upstream body on."""
+    from app.providers.base import ProviderClientError, ProviderCredentialError
+
+    _, responses = mock_http
+    body = {"error": {"code": 400, "message": "API key not valid. secret-upstream-detail", "status": "INVALID_ARGUMENT",
+                      "details": [{"reason": "API_KEY_INVALID"}]}}
+    responses[":generateContent"] = httpx.Response(400, json=body)
+    responses[":streamGenerateContent"] = httpx.Response(400, json=body)
+    provider = GeminiProvider(api_key="bad")
+    with pytest.raises(ProviderCredentialError, match="rejected the API key") as caught:
+        await provider.generate([{"role": "user", "content": "q"}], "m")
+    assert "secret-upstream-detail" not in str(caught.value)
+    with pytest.raises(ProviderCredentialError):
+        [e async for e in provider.generate_stream([{"role": "user", "content": "q"}], "m")]
+    responses[":generateContent"] = httpx.Response(400, json={"error": {"status": "INVALID_ARGUMENT"}})
+    with pytest.raises(ProviderClientError):  # any other 400 stays a request problem
+        await provider.generate([{"role": "user", "content": "q"}], "m")

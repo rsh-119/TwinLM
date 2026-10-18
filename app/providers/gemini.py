@@ -12,6 +12,7 @@ from app.providers.base import (
     GenerationParams,
     GenerationResult,
     PooledHTTPProvider,
+    ProviderCredentialError,
     ProviderUnavailableError,
     StreamEvent,
     TokenUsage,
@@ -88,7 +89,7 @@ class GeminiProvider(PooledHTTPProvider):
         except _NETWORK_ERRORS as exc:
             raise connection_error("gemini", exc) from exc
 
-        raise_for_unavailable(self.name, response.status_code)
+        await self._check_status(response)
         response.raise_for_status()
 
         data = _parse_json(response.content)
@@ -96,6 +97,14 @@ class GeminiProvider(PooledHTTPProvider):
         candidate = data["candidates"][0]
         tool_calls = _tool_calls((candidate.get("content") or {}).get("parts", []))
         return GenerationResult(content, self._extract_usage(data), tool_calls, _finish_reason(candidate, tool_calls))
+
+    async def _check_status(self, response: httpx.Response) -> None:
+        """Status classification, plus Gemini's way of rejecting a key: 400
+        with reason API_KEY_INVALID (not 401/403). Only that reason code is
+        looked for; the upstream body never reaches the error message."""
+        if response.status_code == 400 and b"API_KEY_INVALID" in await response.aread():
+            raise ProviderCredentialError(f"{self.name} rejected the API key (API_KEY_INVALID)")
+        raise_for_unavailable(self.name, response.status_code)
 
     async def generate_stream(
         self, messages: List[Dict[str, str]], model: str, params: Optional[GenerationParams] = None
@@ -111,7 +120,7 @@ class GeminiProvider(PooledHTTPProvider):
                 headers=self._headers(),
                 json=self._build_payload(messages, params),
             ) as response:
-                raise_for_unavailable(self.name, response.status_code)
+                await self._check_status(response)
                 response.raise_for_status()
 
                 tool_index = 0
@@ -158,7 +167,7 @@ class GeminiProvider(PooledHTTPProvider):
         except _NETWORK_ERRORS as exc:
             raise connection_error("gemini", exc) from exc
 
-        raise_for_unavailable(self.name, response.status_code)
+        await self._check_status(response)
         response.raise_for_status()
 
         data = _parse_json(response.content)
