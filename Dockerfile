@@ -23,6 +23,8 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 COPY app ./app
 COPY gateway.toml .
+# ready-made configs, e.g. GATEWAY_CONFIG_PATH=deploy/gateway.beta.toml
+COPY deploy/*.toml ./deploy/
 COPY --from=console /console/out ./console
 
 # Unprivileged runtime user; /app/data holds the usage outbox (and the

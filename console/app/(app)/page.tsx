@@ -1,16 +1,16 @@
 "use client";
 
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { ArrowRight, MessageSquare, Users } from "lucide-react";
+import { ArrowRight, KeyRound, MessageSquare, Users } from "lucide-react";
 import Link from "next/link";
-import { Empty, PageHeader, RoleBadge, RowsSkeleton, Stat } from "@/components/common";
+import { CopyButton, Empty, PageHeader, RoleBadge, RowsSkeleton, Stat } from "@/components/common";
 import { SpendChart } from "@/components/spend-chart";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ApiError, get } from "@/lib/api";
 import { num, pct, plural, usd } from "@/lib/format";
 import { useMe, useTeams } from "@/lib/hooks";
-import type { DailyPoint, SavingsReport, TeamUsage, UsageReport } from "@/lib/types";
+import type { DailyPoint, SavingsReport, TeamSummary, TeamUsage, UsageReport } from "@/lib/types";
 
 function TopModels({ groups }: { groups: UsageReport["groups"] }) {
   const top = [...groups].sort((a, b) => b.requests - a.requests).slice(0, 5);
@@ -82,6 +82,46 @@ function AdminOverview() {
   );
 }
 
+/** First steps for a team without keys (e.g. right after signing up). */
+function GetStarted({ team }: { team: TeamSummary }) {
+  const base = typeof window === "undefined" ? "" : `${window.location.origin}/v1`;
+  const snippet = `client = OpenAI(base_url="${base}", api_key="gw_live_...")`;
+  return (
+    <Card className="border-brand/40">
+      <CardHeader>
+        <CardTitle>Get started</CardTitle>
+        <CardDescription>Three steps to send your app&apos;s AI requests through TwinLM.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ol className="space-y-5 text-sm">
+          <li className="space-y-2">
+            <p><span className="font-medium">1. Create an API key</span> for your app on your team&apos;s page. It&apos;s shown once.</p>
+            <Button asChild size="sm">
+              <Link href={`/teams/view/?id=${team.id}&tab=keys`}><KeyRound /> Create a key</Link>
+            </Button>
+          </li>
+          <li className="space-y-2">
+            <p><span className="font-medium">2. Point your app at TwinLM.</span> Any OpenAI SDK or framework works; change two settings:</p>
+            <div className="flex items-start gap-2 rounded-md border bg-muted/50 p-3">
+              <code className="min-w-0 flex-1 break-all font-mono text-xs">{snippet}</code>
+              <CopyButton value={snippet} />
+            </div>
+            <p className="text-muted-foreground">
+              Use <code className="font-mono text-xs">model=&quot;auto&quot;</code> to let TwinLM pick the cheapest model that fits.
+            </p>
+          </li>
+          <li className="space-y-2">
+            <p><span className="font-medium">3. Or try it right here</span>, then watch requests and spend appear on this page.</p>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/playground/"><MessageSquare /> Open playground</Link>
+            </Button>
+          </li>
+        </ol>
+      </CardContent>
+    </Card>
+  );
+}
+
 function MemberOverview() {
   const teams = useTeams();
   const usage = useQueries({
@@ -110,6 +150,9 @@ function MemberOverview() {
         <Stat label="Your spend" value={usd(total.cost)} loading={teams.isLoading} />
         <Stat label="Answered from cache" value={num(total.cache)} loading={teams.isLoading} hint="Served for $0" />
       </div>
+      {teams.data?.length === 1 && teams.data[0].active_keys === 0 && teams.data[0].my_role === "admin" && (
+        <GetStarted team={teams.data[0]} />
+      )}
       <Card>
         <CardHeader>
           <CardTitle>Your teams</CardTitle>

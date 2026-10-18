@@ -1,10 +1,10 @@
 {
  "schema": 1,
  "source": {
-  "revision": "e95023d7d01f0a3823b33ac2baff49bffaf726d4",
-  "working_tree_dirty": false,
-  "fingerprint": "1db0548ac9dd5d4c",
-  "updated_at": "2026-10-16T19:51:42Z"
+  "revision": "80770a8b93f8a0d2add46d46fdbad40cc9f21286",
+  "working_tree_dirty": true,
+  "fingerprint": "d3f801b9fc804782",
+  "updated_at": "2026-10-17T05:17:32Z"
  },
  "annotations": [
   {
@@ -1224,6 +1224,14 @@
    "auto": true
   },
   {
+   "id": "route:POST /auth/signup",
+   "kind": "route",
+   "path": "app/api/teams.py",
+   "symbol": "signup",
+   "purpose": "",
+   "auto": true
+  },
+  {
    "id": "route:POST /console/teams/{team_id}/keys",
    "kind": "route",
    "path": "app/api/teams.py",
@@ -2389,6 +2397,13 @@
    "to": "app.api.teams",
    "type": "routes_to",
    "note": "setup",
+   "auto": true
+  },
+  {
+   "from": "route:POST /auth/signup",
+   "to": "app.api.teams",
+   "type": "routes_to",
+   "note": "signup",
    "auto": true
   },
   {

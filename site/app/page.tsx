@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { ArrowUpRight, Plus } from "lucide-react";
 import Estimator from "@/components/Estimator";
 import { CodeBlock, CodeTabs } from "@/components/Code";
-import SiteHeader, { REPO } from "@/components/SiteHeader";
+import SiteHeader, { REPO, TRY_URL } from "@/components/SiteHeader";
 
 const CONTACT = `${REPO}/issues/new?title=${encodeURIComponent("Managed setup enquiry")}&body=${encodeURIComponent(
   "Company:\nWhat you use AI for:\nApprox. monthly AI spend:\nWhere you host:",
@@ -78,7 +78,13 @@ const FEATURES: [string, string][] = [
   ["Your own models (Ollama, vLLM, fine-tunes) behind the same key", "custom endpoint"],
 ];
 
+const BETA_FAQ: [string, string][] = TRY_URL ? [[
+  "Can I try it without installing anything?",
+  "Yes: the hosted beta is free. Sign up and you get your own team, an API key and a monthly budget on free models, and you can point an app at it or use the playground right away. It is shared, free-tier infrastructure with limits and no uptime promise, and your prompts pass through our server to the AI providers. For real traffic, self-host it: then nothing leaves your infrastructure.",
+]] : [];
+
 const FAQ: [string, string][] = [
+  ...BETA_FAQ,
   [
     "Do we have to change our code?",
     "Usually only the base URL and the API key. TwinLM speaks the OpenAI API, so the OpenAI SDKs, LangChain, LlamaIndex and most AI tools work unchanged. Parameters it doesn't support are rejected with a clear error instead of being silently ignored, so you find out on the first test call.",
@@ -422,9 +428,16 @@ export default function Home() {
                 <li>Your data stays with you</li>
                 <li>Community support on GitHub</li>
               </ul>
-              <a href={REPO} className="label mt-10 inline-flex h-12 items-center gap-2 border border-ink px-6 text-base hover:bg-ink hover:text-paper">
-                Get it on GitHub <ArrowUpRight size={18} strokeWidth={2} aria-hidden />
-              </a>
+              <div className="mt-10 flex flex-wrap gap-4">
+                <a href={REPO} className="label inline-flex h-12 items-center gap-2 border border-ink px-6 text-base hover:bg-ink hover:text-paper">
+                  Get it on GitHub <ArrowUpRight size={18} strokeWidth={2} aria-hidden />
+                </a>
+                {TRY_URL && (
+                  <a href={TRY_URL} className="label inline-flex h-12 items-center bg-ink px-6 text-base text-paper transition-colors hover:bg-signal hover:text-on-signal">
+                    Try the hosted beta
+                  </a>
+                )}
+              </div>
             </div>
             <div className="border-t border-ink py-10 lg:border-l lg:border-t-0 lg:pl-12">
               <h3 className="display text-3xl">Managed setup and support</h3>
@@ -469,8 +482,8 @@ export default function Home() {
                 Deploy in five minutes, point one app at it, and read the savings report after a week.
               </p>
               <div className="flex flex-wrap gap-4">
-                <a href="#deploy" className="label inline-flex h-12 items-center bg-signal px-6 text-base text-on-signal hover:bg-paper">
-                  Get started
+                <a href={TRY_URL ?? "#deploy"} className="label inline-flex h-12 items-center bg-signal px-6 text-base text-on-signal hover:bg-paper">
+                  {TRY_URL ? "Try it free" : "Get started"}
                 </a>
                 <a href={REPO} className="label inline-flex h-12 items-center border border-paper px-6 text-base hover:bg-paper hover:text-ink">
                   Star on GitHub

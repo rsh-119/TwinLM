@@ -17,7 +17,7 @@ def auth_on(settings, monkeypatch):
 
 
 def setup_admin(client):
-    assert client.get("/auth/setup").json() == {"needs_setup": True}
+    assert client.get("/auth/setup").json()["needs_setup"] is True
     r = client.post("/auth/setup", json={"admin_token": "admin-token", "email": "Boss@acme.io",
                                          "name": "Boss", "password": "a-good-password"})
     assert r.status_code == 200 and "twinlm_session" in r.cookies
@@ -29,7 +29,7 @@ def test_first_run_setup(client):
                                            "password": "a-good-password"})
     assert bad.status_code == 401
     setup_admin(client)
-    assert client.get("/auth/setup").json() == {"needs_setup": False}
+    assert client.get("/auth/setup").json()["needs_setup"] is False
     again = client.post("/auth/setup", json={"admin_token": "admin-token", "email": "b@acme.io", "name": "B",
                                              "password": "a-good-password"})
     assert again.status_code == 409

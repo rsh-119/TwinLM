@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     auth_cache_seconds: float = 30.0
     usage_spool_path: str = "./data/usage-spool.db"
     max_concurrent_requests: int = 100
+    # Hosted beta: visitors may create an account from the console's
+    # sign-in page; each gets their own team (as its admin) with a monthly
+    # budget. Off = only admins add people.
+    signup_enabled: bool = False
+    signup_max_accounts: int = 50  # all console users, incl. members added by team admins
+    signup_team_budget_usd: float = 1.0  # monthly budget of each signed-up team
     # Budget alerts (80% / 100%) are POSTed here as JSON with a Slack-style
     # `text` field; empty = alerts are only logged and shown in the console.
     budget_alert_webhook_url: str = ""

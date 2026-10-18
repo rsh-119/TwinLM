@@ -6,6 +6,7 @@ export const DOCS_NAV: { section: string; pages: [title: string, href: string][]
       ["Introduction", "/docs/"],
       ["Quickstart", "/docs/quickstart/"],
       ["Deployment", "/docs/deploy/"],
+      ["Hosted beta", "/docs/hosted-beta/"],
     ],
   },
   {

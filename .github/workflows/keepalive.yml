@@ -1,0 +1,22 @@
+name: Keep hosted beta awake
+
+# Render's free plan sleeps after 15 idle minutes; the first visitor then
+# waits about a minute. This pings the beta every 10 minutes. Set the repo
+# variable BETA_URL (Settings -> Secrets and variables -> Actions ->
+# Variables), e.g. https://twinlm-beta.onrender.com; without it, it does
+# nothing. One always-on free service fits in Render's 750 free hours/month.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    if: vars.BETA_URL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - run: curl -fsS --retry 3 --retry-delay 20 --max-time 90 "${{ vars.BETA_URL }}/health"
