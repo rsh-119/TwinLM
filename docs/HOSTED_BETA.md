@@ -26,10 +26,19 @@ string (not the "pooled" one: migrations take a database lock that connection po
 
 ## 2. Gateway (Render)
 
+Render asks for a card for **Blueprints**, even free ones. A web service created by hand on the Free instance type
+doesn't need one:
+
 1. Sign up at [render.com](https://render.com) with GitHub.
-2. **New → Blueprint**, pick this repository, set **Blueprint path** to `deploy/render-beta.yaml`.
-3. Fill in `DATABASE_URL` (Neon), `GEMINI_API_KEY`, `GROQ_API_KEY`; **Apply**.
-4. When the deploy is live, note the URL, e.g. `https://twinlm-beta.onrender.com`. `GET /ready` returns `ready`.
+2. **New → Web Service → Existing image**, image URL `ghcr.io/rsh-119/twinlm:latest`.
+3. Name `twinlm-beta`, region **Ohio**, instance type **Free**, health check path `/ready`.
+4. **Environment**: add the variables listed in `envVars` of [`deploy/render-beta.yaml`](../deploy/render-beta.yaml),
+   with your own random strings (32+ characters) for `ADMIN_TOKEN` and `PROVIDER_KEYS_SECRET`, plus
+   `DATABASE_URL` (Neon), `GEMINI_API_KEY` and `GROQ_API_KEY`. **Deploy**.
+5. When the deploy is live, note the URL, e.g. `https://twinlm-beta.onrender.com`. `GET /ready` returns `ready`.
+
+With a card on file you can instead use **New → Blueprint** with path `deploy/render-beta.yaml`, which fills in
+the same settings and generates the secrets.
 
 ## 3. Your admin account
 
