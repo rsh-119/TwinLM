@@ -222,7 +222,7 @@ export default function ModelsPage() {
         <CardHeader className="flex flex-row items-start justify-between gap-4">
           <div>
             <CardTitle>Prices</CardTitle>
-            <CardDescription>USD per million tokens. Without a price, a model&apos;s cost shows as unknown.</CardDescription>
+            <CardDescription>USD per million tokens. Without a price, a model&apos;s cost shows as unknown. Built-in prices can go out of date: edit one to override it.</CardDescription>
           </div>
           <div className="flex gap-2">
             <ExportButton filename="prices" rows={(prices.data ?? []).map((p) => ({ ...p }))} />
@@ -247,7 +247,7 @@ export default function ModelsPage() {
                     <TableCell className="pl-5 font-mono text-xs">{p.key}</TableCell>
                     <TableCell className="tabular text-right">${p.input_per_million}</TableCell>
                     <TableCell className="tabular text-right">${p.output_per_million}</TableCell>
-                    <TableCell><Badge variant="outline" className="font-normal">{p.source === "panel" ? "Console" : "gateway.toml"}</Badge></TableCell>
+                    <TableCell><Badge variant="outline" className="font-normal" title={p.as_of ? `Checked ${p.as_of}` : undefined}>{p.source === "panel" ? "Console" : p.source === "built-in" ? "Built-in" : "gateway.toml"}</Badge></TableCell>
                     <TableCell>
                       <div className="flex justify-end">
                         <PriceDialog row={p} />

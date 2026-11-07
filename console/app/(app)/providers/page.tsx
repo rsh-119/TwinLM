@@ -355,7 +355,7 @@ function ProviderCard({ p }: { p: ProviderRow }) {
           <CardTitle className="truncate">{p.name}</CardTitle>
           <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground"><StatusDot tone={tone} /> {label}</p>
         </div>
-        {p.source === "panel" ? <ProviderMenu p={p} /> : <Badge variant="outline" className="font-normal">gateway.toml</Badge>}
+        {p.source === "panel" ? <ProviderMenu p={p} /> : <Badge variant="outline" className="font-normal">{p.source}</Badge>}
       </CardHeader>
       <CardContent className="space-y-1.5 text-sm">
         <div className="flex justify-between gap-3"><span className="text-muted-foreground">Model</span><span className="truncate font-mono text-xs">{p.default_model}</span></div>

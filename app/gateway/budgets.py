@@ -8,8 +8,9 @@ worst-case cost (input estimate + output cap, at the priciest model the
 alias may fall back to) is reserved and released once its real cost is
 queued. A request that would push any budget past its limit is refused,
 so budgets are hard as long as the output is capped and prices are known.
-Unpriced models reserve nothing (their cost is unknown) and only stop the
-next request.
+A chat request under a budget whose model has no price at all is refused
+(UnpricedModel): its cost could never be counted. An unpriced fallback
+behind a priced model still reserves nothing for itself.
 
 Reservations are in-process, or in Redis when REDIS_URL is set so several
 gateway instances share them (app.gateway.shared)."""
@@ -110,13 +111,13 @@ def spent(db: Session, limit: Limit, writer=None) -> float:
 def worst_case_cost(
     targets: Iterable[Tuple[str, str]], pricing: Dict[str, PriceConfig], input_chars: int,
     max_output_tokens: Optional[int],
-) -> float:
+) -> Optional[float]:
     """Upper estimate of one request's cost over the targets it may be sent
-    to; 0 when none is priced. Input tokens ~ chars/3 (most tokenizers
+    to; None when none of them is priced (no upper bound). Input tokens ~ chars/3 (most tokenizers
     average about 4 characters per token for English)."""
     prices = [pricing[price_key(p, m)] for p, m in targets if price_key(p, m) in pricing]
     if not prices:
-        return 0.0
+        return None
     input_tokens = math.ceil(input_chars / 3)
     return (input_tokens * max(p.input_per_million for p in prices)
             + (max_output_tokens or 0) * max(p.output_per_million for p in prices)) / 1_000_000
@@ -141,6 +142,10 @@ class BudgetExceeded(Exception):
     def __init__(self, limit: Limit):
         super().__init__(f"{limit.label} budget exceeded")
         self.limit = limit
+
+
+class UnpricedModel(Exception):
+    """A budget applies, but the request may reach a model with no price."""
 
 
 class Reservation:
@@ -251,14 +256,17 @@ class BudgetTracker:
         """Budgets changed (admin API): re-read them on the next request."""
         self._budgets = None
 
-    def admit(self, db: Session, principal: Principal, estimate: float, writer=None) -> Optional[Reservation]:
+    def admit(self, db: Session, principal: Principal, estimate: Optional[float], writer=None) -> Optional[Reservation]:
         """Reserve `estimate` against every budget that applies, or raise
-        BudgetExceeded (nothing stays reserved). Reserving first and then
+        BudgetExceeded (nothing stays reserved). `estimate` None (unpriced
+        model) raises UnpricedModel when any budget applies. Reserving first and then
         checking means two concurrent requests can both be refused near the
         limit, never both admitted past it."""
         limits = applicable(principal, self.budgets(db))
         if not limits:
             return None
+        if estimate is None:
+            raise UnpricedModel()
         totals = self.reservations.reserve([l.key for l in limits], estimate)
         reservation = Reservation(self.reservations, [l.key for l in limits], estimate)
         try:

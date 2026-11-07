@@ -17,8 +17,9 @@ Providers: one OpenAI-compatible adapter (OpenAI, Groq, DeepSeek, Together,
 Mistral, Ollama, vLLM, ...) plus Gemini.
 
 Budgets refuse a request whose worst-case cost would cross the limit, so
-they hold as long as output is capped and prices are known; unpriced models
-and provider billing differences can still go over. Verify prices before
+they hold as long as output is capped and prices are known. A key under a
+budget can't call a model with no price (400); unpriced fallbacks and
+provider billing differences can still go over. Verify prices before
 relying on cost reports or budgets.
 
 It started from a single principle that still sets it apart: **the gateway
@@ -63,8 +64,8 @@ SQLite in the `twinlm-data` volume by default; pass
 `-e DATABASE_URL=postgresql+psycopg://user:pass@host/db` for Postgres. To
 change providers or aliases, mount your own config:
 `-v ./gateway.toml:/app/gateway.toml:ro`. Or run gateway + PostgreSQL with
-`docker compose up -d`, adding the console, monitoring or TLS ingress as
-profiles (see [Docker](#docker)).
+`docker compose up -d`, adding monitoring or TLS ingress as profiles (see
+[Docker](#docker)).
 
 **2. Create an API key** (shown once):
 
@@ -88,13 +89,18 @@ const client = new OpenAI({ baseURL: "http://localhost:8000/v1", apiKey: "gw_liv
 const reply = await client.chat.completions.create({ model: "auto", messages: [{ role: "user", content: "Hi" }] });
 ```
 
+**Hosted beta.** `SIGNUP_ENABLED=true` lets visitors create an account from the console's sign-in page: each
+gets their own team, keys and a monthly budget on the models you configure. Free-tier setup (Render + Neon +
+Gemini/Groq free tiers) and operation: [docs/HOSTED_BETA.md](docs/HOSTED_BETA.md).
+
 **Teams and members.** People sign in to the console with email and password; admins, team admins and
 members get keys and spend per team (`docs` → Teams and members). First admin: `python -m app.ops create-admin`.
 
 **Add providers without a restart.** In the web console (http://localhost:8000/app) the
 Providers tab adds Anthropic, OpenAI, Mistral, DeepSeek and other providers with just an API key (stored
-encrypted with `PROVIDER_KEYS_SECRET`), and the Models tab puts them into aliases and sets prices. Changes
-apply immediately.
+encrypted with `PROVIDER_KEYS_SECRET`). The lightest suggested model is pre-selected; Test connection lists
+the chat models on your key, and "Change model" switches an existing provider. The Models tab puts them into
+aliases and sets prices. Changes apply immediately.
 
 LangChain, LlamaIndex and other OpenAI-compatible frameworks work the same
 way: set their base URL and API key. `model` is an alias from
@@ -158,6 +164,7 @@ Details, design decisions and known limits are in
 | Google Gemini | `gemini` | enabled in `gateway.toml` (chat, streaming, embeddings) |
 | Groq | `openai_compatible` | enabled (chat, streaming) |
 | OpenAI, Ollama, NVIDIA NIM, vLLM, … | `openai_compatible` | add a `[providers.x]` block (examples in `gateway.toml`); untested against the live services |
+| 24 presets: Anthropic, OpenAI, Mistral, DeepSeek, xAI, Moonshot, Z.ai, MiniMax, DeepInfra, … | `openai_compatible` | add in the console's Providers tab, or set `<NAME>_API_KEY` (`DEEPSEEK_API_KEY` enables `deepseek`; list in `app/gateway/presets.py`). A key from the environment makes the provider callable as `deepseek` or `deepseek/<model>`; it joins an alias only when you add it. Azure and local providers are added in the console |
 | Mock | `mock` | no network; for load tests and running without keys |
 
 ## Configuration
@@ -361,7 +368,10 @@ tokens) plus the output cap (`max_tokens` or `default_max_output_tokens`), at
 the priciest model the alias may fall back to. It is reserved while the
 request runs and replaced by the real cost when it ends, so concurrent
 requests can't overshoot together. Without an output cap only the input is
-reserved; unpriced models reserve nothing and stop only the next request.
+reserved. A model with no price at all is refused (400) for keys under a
+budget; an unpriced fallback behind a priced model reserves nothing. Built-in
+prices count, so use `allowed_models` or `builtin_prices = false` if budgets
+shouldn't open those models to a key.
 
 **Alerts** fire once per budget period at 80% and at 100% (also on the first
 refused request): a log line, the `llm_budget_alerts_total` metric, the
@@ -381,7 +391,8 @@ sampling params, response format and the caller's project, so answers
 never cross projects. Requests where the guardrails detect secrets or PII
 are never cached. Generated sensitive output and tool-call turns are also
 excluded. Responses carry `X-Cache: HIT|MISS`, hits are logged at zero cost,
-and `DELETE /admin/cache` clears it. LRU with TTL and a byte cap, in-process.
+and `DELETE /admin/cache` clears it. LRU with TTL and a byte cap, in-process
+unless `REDIS_URL` is set ([several instances](#running-several-instances)).
 **Semantic cache** (opt-in per alias). An FAQ or support bot gets the same
 question in many wordings. With
 
@@ -406,9 +417,12 @@ Every request (successes, errors, blocks, cache hits, client
 disconnects) produces one `request_logs` row: request ID, key, project,
 provider, model, tokens, cost, latency, time to first token, status,
 fallback used, cache hit. Prompts and replies are never stored there.
-Prices are USD per million tokens in `[pricing."provider/model"]`. The
-shipped values are examples to verify. An unpriced model is recorded
-with `cost = null`, not 0.
+Prices are USD per million tokens in `[pricing."provider/model"]` or the
+console. The `gateway.toml` values are examples to verify. Common preset models
+also have built-in prices ([`model_prices.py`](app/gateway/model_prices.py)), a
+dated snapshot from provider price pages that either of those overrides; they
+ignore cached-input discounts and long-prompt rates. Set `builtin_prices = false`
+to turn them off. An unpriced model is recorded with `cost = null`, not 0.
 
 ```bash
 curl "http://localhost:8000/admin/usage?hours=24&group_by=model" -H "Authorization: Bearer $ADMIN_TOKEN"
@@ -474,11 +488,13 @@ to `max_repair_attempts` times; if the reply is still invalid it returns
   `llm_provider_health`, `llm_active_requests`,
   `llm_guardrail_violations_total`,
   `llm_structured_output_failures_total`, `llm_rate_limited_total`,
-  `llm_budget_alerts_total`.
+  `llm_budget_alerts_total`, `llm_unpriced_calls_total`,
+  `llm_usage_backlog_rows`, `llm_usage_deadletter_rows`,
+  `llm_usage_write_failures_total`, `llm_shared_state_up`.
 - **Grafana**: the "TwinLM Gateway" dashboard is provisioned by compose.
 - **Admin API** (`Authorization: Bearer $ADMIN_TOKEN`; disabled when
   unset): `/admin/providers`, `/admin/models`, `/admin/usage`,
-  `/admin/keys`, `/admin/cache`, `/admin/budgets`, `/admin/budget-alerts`.
+  `/admin/savings`, `/admin/keys`, `/admin/cache`, `/admin/budgets`, `/admin/budget-alerts`.
 - No distributed tracing (OpenTelemetry); request IDs correlate logs and
   usage rows.
 
@@ -517,11 +533,12 @@ Nothing to configure first:
 
 Services: **secrets** (one-shot), **gateway** (non-root, health check on
 `/ready`, auth on, `gateway.toml` mounted read-only, migrations applied on
-start), **postgres** (volume, health check); profiles: **ui**,
+start), **postgres** (volume, health check); profiles:
 **prometheus** + **grafana**, **caddy**. Images are pinned by digest and
 Python dependencies are hash-locked (`requirements.lock`). Backups,
 restores, retention, key rotation and outbox reconciliation:
-[docs/OPERATIONS.md](docs/OPERATIONS.md). No Redis or Qdrant: nothing uses them.
+[docs/OPERATIONS.md](docs/OPERATIONS.md). Redis isn't part of the default stack; it's only needed for
+[several instances](#running-several-instances).
 
 ```bash
 docker compose logs -f gateway   # JSON logs
@@ -543,7 +560,8 @@ circuit breakers and latency stats (each learns provider health from its own
 traffic), the semantic cache and the usage outbox. If Redis is unreachable,
 limits and the cache fail open (requests are served, unlimited and uncached)
 and the gateway logs it; Redis is skipped for 10 s after an error so an outage
-doesn't slow requests down.
+doesn't slow requests down. The `llm_shared_state_up` metric and the
+`TwinLMSharedStateDown` alert show when this happens.
 
 To try it on one machine, `loadtest/compose.scale.yml` adds Redis, a second gateway and a Caddy load
 balancer to the Compose stack: `docker compose -f docker-compose.yml -f loadtest/compose.scale.yml up -d`.

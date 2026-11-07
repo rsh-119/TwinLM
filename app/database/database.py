@@ -181,6 +181,16 @@ def _budgets(conn: Connection) -> None:
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_request_logs_user_id ON request_logs (user_id)"))
 
 
+def _budget_indexes(conn: Connection) -> None:
+    """Migration 6: (scope column, created_at) indexes for the per-request
+    budget SUM over request_logs."""
+    # api_key_id reuses migration 1's name, which only upgraded databases have
+    for name, column in (("key", "api_key_id"), ("project", "project"), ("user", "user_id")):
+        conn.execute(text(
+            f"CREATE INDEX IF NOT EXISTS ix_request_logs_{name}_created ON request_logs ({column}, created_at)"
+        ))
+
+
 # Append only. Each migration must be idempotent: it also runs after
 # create_all() has built a fresh schema.
 MIGRATIONS: List[Tuple[int, Callable[[Connection], None]]] = [
@@ -189,6 +199,7 @@ MIGRATIONS: List[Tuple[int, Callable[[Connection], None]]] = [
     (3, _runtime_config_tables),
     (4, _teams_and_users),
     (5, _budgets),
+    (6, _budget_indexes),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 

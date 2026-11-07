@@ -2,8 +2,8 @@
 except Gemini speaks the OpenAI chat-completions API, so it uses the
 `openai_compatible` adapter. Model lists are suggestions (any model name
 the provider accepts works, and "Test connection" fetches the provider's
-live list); prices are left to the admin because they change. Anthropic is
-reached through its own OpenAI-compatible endpoint.
+live list); prices are in model_prices.py, and any other model needs one from
+the admin. Anthropic is reached through its own OpenAI-compatible endpoint.
 
 Each list is ordered lightest/cheapest first, and the first one is the
 default: start cheap, move up only where quality needs it. `free_tier`
@@ -44,7 +44,7 @@ PRESETS: Dict[str, Preset] = {
                   ["mistral-small-latest", "mistral-medium-latest", "mistral-large-latest", "codestral-latest"],
                   ["chat", "tools"], "https://console.mistral.ai/api-keys", free_tier=True),
     "deepseek": _p("DeepSeek", "openai_compatible", "https://api.deepseek.com/v1",
-                   ["deepseek-chat", "deepseek-reasoner"], ["chat", "tools"],
+                   ["deepseek-flash", "deepseek-v4-pro"], ["chat", "tools"],
                    "https://platform.deepseek.com/api_keys"),
     "groq": _p("Groq", "openai_compatible", "https://api.groq.com/openai/v1",
                ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"],
@@ -82,6 +82,22 @@ PRESETS: Dict[str, Preset] = {
     "cohere": _p("Cohere", "openai_compatible", "https://api.cohere.ai/compatibility/v1",
                  ["command-r7b-12-2024", "command-a-03-2025"], ["chat", "tools"],
                  "https://dashboard.cohere.com/api-keys", free_tier=True),
+    "deepinfra": _p("DeepInfra", "openai_compatible", "https://api.deepinfra.com/v1/openai",
+                    ["deepseek-ai/DeepSeek-V4.1-Flash", "zai-org/GLM-5.3-Flash", "Qwen/Qwen3.6-27B"],
+                    ["chat", "tools"], "https://deepinfra.com/dash/api_keys"),
+    "novita": _p("Novita AI", "openai_compatible", "https://api.novita.ai/openai/v1",
+                 ["deepseek/deepseek-v4.1-flash", "qwen/qwen3.8-flash", "minimax/minimax-m3"],
+                 ["chat", "tools"], "https://novita.ai/settings/key-management"),
+    "sambanova": _p("SambaNova", "openai_compatible", "https://api.sambanova.ai/v1",
+                    ["MiniMax-M3.1-Flash", "gpt-oss-120b", "Meta-Llama-3.3-70B-Instruct"],
+                    ["chat", "tools"], "https://cloud.sambanova.ai/apis"),
+    "moonshot": _p("Moonshot (Kimi)", "openai_compatible", "https://api.moonshot.ai/v1",
+                   ["kimi-k3.1-pro", "kimi-k3"], ["chat", "tools"], "https://platform.kimi.ai/console/api-keys"),
+    "zai": _p("Z.ai (GLM)", "openai_compatible", "https://api.z.ai/api/paas/v4",
+              ["glm-5.3-flash", "glm-5.3"], ["chat", "tools"], "https://z.ai/manage-apikey/apikey-list"),
+    "minimax": _p("MiniMax", "openai_compatible", "https://api.minimax.io/v1",
+                  ["MiniMax-M3.1-Flash", "MiniMax-M3"], ["chat", "tools"],
+                  "https://platform.minimax.io/user-center/basic-information/interface-key"),
     "ollama": _p("Ollama (local)", "openai_compatible", "http://host.docker.internal:11434/v1",
                  ["llama3.2", "qwen2.5"], ["chat"], None, needs_key=False, free_tier=True),
     "lmstudio": _p("LM Studio (local)", "openai_compatible", "http://host.docker.internal:1234/v1",

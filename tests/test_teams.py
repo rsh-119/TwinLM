@@ -72,6 +72,18 @@ def test_sign_in_flow_and_passwords(client):
     assert client.post("/auth/login", json={"email": "a@acme.io", "password": "x"}).status_code == 429
 
 
+def test_password_change_and_reset_sign_out_other_sessions(client):
+    created = new_user(client, "s@acme.io")
+    current = sign_in(client, "s@acme.io", created["temporary_password"])
+    stolen = bearer(client.post("/auth/login", json={"email": "s@acme.io", "password": "a-good-password"}).json()["token"])
+    client.post("/auth/password", json={"current_password": "a-good-password", "new_password": "another-password"},
+                headers=current)
+    assert client.get("/auth/me", headers=current).status_code == 200  # the session that changed it stays
+    assert client.get("/auth/me", headers=stolen).status_code == 401
+    client.patch(f"/admin/users/{created['id']}", json={"reset_password": True}, headers=ADMIN_TOKEN)
+    assert client.get("/auth/me", headers=current).status_code == 401
+
+
 def test_disabled_users_and_last_admin(client):
     admin = new_user(client, "a@acme.io", role="admin")
     other = new_user(client, "b@acme.io")

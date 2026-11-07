@@ -68,6 +68,15 @@ def end_session(db: Session, token: str) -> None:
     db.commit()
 
 
+def end_user_sessions(db: Session, user_id: str, keep_token: str = "") -> None:
+    """Sign a user out everywhere (but `keep_token`), after a password change,
+    reset or disable. The caller commits."""
+    query = db.query(UserSession).filter(UserSession.user_id == user_id)
+    if keep_token:
+        query = query.filter(UserSession.token_hash != _token_hash(keep_token))
+    query.delete(synchronize_session=False)
+
+
 @dataclass
 class ConsoleUser:
     user: User

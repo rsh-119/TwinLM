@@ -89,6 +89,19 @@ def test_key_is_encrypted_and_never_returned(panel):
     session.close()
 
 
+def test_base_url_is_checked_and_a_new_host_needs_the_key_again(panel):
+    body = {"type": "openai_compatible", "default_model": "m"}
+    for url in ("http://169.254.169.254/latest", "file:///etc/passwd", "http://[fe80::1]/v1"):
+        assert add(panel, name="evil", base_url=url, **body).status_code == 400, url
+    assert add(panel, name="local", base_url="http://127.0.0.1:11434/v1", **body).status_code == 201  # Ollama
+
+    moved = {"base_url": "https://attacker.example/v1"}
+    refused = panel.patch("/admin/config/providers/local", json=moved, headers=ADMIN)
+    assert refused.status_code == 400 and "re-enter the API key" in refused.json()["detail"]
+    assert panel.patch("/admin/config/providers/local", json={**moved, "api_key": "sk-new-key-1234"},
+                       headers=ADMIN).status_code == 200
+
+
 def test_disable_falls_back_and_enable_restores(panel):
     add(panel)
     panel.put("/admin/config/aliases/mixed", json={"targets": ["extra", "base"]}, headers=ADMIN)
@@ -143,6 +156,47 @@ def test_saving_a_key_needs_the_secret(panel, settings, monkeypatch):
     response = add(panel)
     assert response.status_code == 503 and "PROVIDER_KEYS_SECRET" in response.json()["detail"]
     assert add(panel, name="local", api_key=None).status_code == 201  # keyless providers still work
+
+
+def test_key_in_environment_enables_a_preset(panel, monkeypatch):
+    add(panel, name="mistral")  # a panel provider of that name wins over the environment
+    for name in ("DEEPSEEK", "MISTRAL", "AZURE"):
+        monkeypatch.setenv(f"{name}_API_KEY", "env-key")
+    session = panel.factory()
+    config, keys = runtime.effective_config(session)
+    runtime.build(session)  # the merged config makes a working router
+    session.close()
+    assert config.providers["deepseek"].api_key_setting == "deepseek_api_key"
+    assert "azure" not in config.providers  # its URL needs a resource name
+    assert config.models["auto"].targets == ["base"]  # no alias starts spending on it
+    assert keys["mistral"] == "sk-test-abcdef123456" and config.providers["mistral"].api_key_setting is None
+    listed = {p["name"]: p for p in panel.get("/admin/config/providers", headers=ADMIN).json()}
+    assert listed["deepseek"]["source"] == "environment" and listed["mistral"]["source"] == "panel"
+    assert listed["deepseek"]["key_hint"] == "from DEEPSEEK_API_KEY"
+
+
+def test_builtin_prices(panel):
+    def prices():
+        return {p["key"]: p for p in panel.get("/admin/config/prices", headers=ADMIN).json()}
+
+    def provider(**body):
+        assert panel.post("/admin/config/providers", json={"api_key": "sk-test-abcdef123456", **body},
+                          headers=ADMIN).status_code == 201
+
+    key = "work/gpt-4o-mini"
+    provider(name="work", preset="openai")  # found by endpoint, whatever the name
+    assert prices()[key]["input_per_million"] == 0.15 and prices()[key]["source"] == "built-in"
+    provider(name="proxy", preset="openai", base_url="http://127.0.0.1:9/v1")  # not OpenAI's billing
+    assert not any(k.startswith("proxy/") for k in prices())
+
+    price = {"key": key, "input_per_million": 9, "output_per_million": 9}
+    assert panel.put("/admin/config/prices", json=price, headers=ADMIN).status_code == 200
+    assert prices()[key]["input_per_million"] == 9 and prices()[key]["source"] == "panel"
+    assert panel.delete("/admin/config/prices", params={"key": key}, headers=ADMIN).status_code == 200
+    assert prices()[key]["source"] == "built-in"
+
+    runtime.set_base_config(GatewayConfig.model_validate({**BASE, "builtin_prices": False}))
+    assert key not in prices()
 
 
 def test_config_survives_a_restart(panel):

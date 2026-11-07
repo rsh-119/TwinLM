@@ -110,3 +110,5 @@ def test_redis_outage_fails_open():
     assert cache.get("k") is None
     assert RedisReservations(down).reserve(["org:*:daily"], 2.0) == {"org:*:daily": 2.0}
     assert down.down_until > 0  # later calls skip Redis without waiting
+    from app.observability import SHARED_STATE_UP
+    assert SHARED_STATE_UP._value.get() == 0  # alerts: limits are per instance now

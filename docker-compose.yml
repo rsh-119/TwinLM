@@ -50,6 +50,11 @@ services:
       DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
       # encrypts provider API keys added from the admin console
       PROVIDER_KEYS_SECRET_FILE: /run/secrets/provider_keys_secret
+      # trust X-Forwarded-For/-Proto from Caddy (another container), so login
+      # throttling sees the real client IP and cookies get Secure over TLS.
+      # Clients reaching port 8000 directly can set these headers too: keep
+      # GATEWAY_BIND private or set this to Caddy's address.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
     volumes:
       - ${GATEWAY_CONFIG_FILE:-./gateway.toml}:/app/gateway.toml:ro
       - secrets:/run/secrets:ro

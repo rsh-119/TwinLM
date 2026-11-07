@@ -3,13 +3,14 @@ added from the admin panel (database), merged into one GatewayConfig and
 applied without a restart.
 
 Precedence: gateway.toml is the base. Panel providers are added next to it
-(names may not clash). A panel alias replaces a toml alias of the same
-name. Panel prices add to or override toml prices. The merged config goes
+(names may not clash), then presets with a key in the environment. A panel alias replaces a toml alias of the same
+name. Panel prices add to or override toml prices, and both override the
+built-in ones (app/gateway/model_prices.py). The merged config goes
 through the same validation as gateway.toml."""
 import asyncio
 import json
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -17,8 +18,11 @@ from app.config import get_settings
 from app.database.models import AliasOverride, PriceOverride, ProviderConfigRow
 from app.gateway import secret_box
 from app.gateway.config import GatewayConfig, get_gateway_config
+from app.gateway.model_prices import BUILTIN_PRICES
+from app.gateway.presets import PRESETS
+from app.gateway.pricing import price_key
 from app.gateway.shared import get_redis
-from app.router.model_router import ModelRouter, build_router, swap_router
+from app.router.model_router import ModelRouter, build_router, provider_api_key, swap_router
 
 logger = logging.getLogger("twinlm.runtime")
 
@@ -38,6 +42,34 @@ def base_config() -> GatewayConfig:
 def set_base_config(config: Optional[GatewayConfig]) -> None:
     global _base
     _base = config
+
+
+def _env_providers(taken: Set[str]) -> Dict[str, dict]:
+    """Presets whose key is in the environment (DEEPSEEK_API_KEY enables
+    `deepseek`). Not added to any alias: they cost money, so routing to one
+    stays a choice. Azure needs a resource name, so it can't be automatic."""
+    settings = get_settings()
+    return {
+        name: {"type": preset["type"], "base_url": preset["base_url"], "default_model": preset["default_model"],
+               "api_key_setting": f"{name}_api_key", "capabilities": preset["capabilities"],
+               "auth_header": preset["auth_header"]}
+        for name, preset in PRESETS.items()
+        if name not in taken and preset["needs_key"] and preset["default_model"]
+        and "YOUR-" not in (preset["base_url"] or "") and provider_api_key(settings, f"{name}_api_key")
+    }
+
+
+def _builtin_prices(providers: Dict[str, dict]) -> Dict[str, dict]:
+    """Built-in prices for every provider on a preset's endpoint, whatever its
+    name. Matching the endpoint, not the name, keeps a proxy or local server
+    called "openai" from being billed at OpenAI's prices."""
+    presets = {(preset["type"], (preset["base_url"] or "").rstrip("/")): name for name, preset in PRESETS.items()}
+    return {
+        price_key(name, model): {"input_per_million": prices[0], "output_per_million": prices[1]}
+        for name, cfg in providers.items()
+        for model, prices in BUILTIN_PRICES.get(
+            presets.get((cfg["type"], (cfg.get("base_url") or "").rstrip("/"))), {}).items()
+    }
 
 
 def effective_config(db: Session) -> Tuple[GatewayConfig, Dict[str, str]]:
@@ -76,6 +108,9 @@ def effective_config(db: Session) -> Tuple[GatewayConfig, Dict[str, str]]:
     for row in db.query(PriceOverride).all():
         data["pricing"][row.key] = {"input_per_million": row.input_per_million,
                                     "output_per_million": row.output_per_million}
+    data["providers"].update(_env_providers({*data["providers"], *data["models"], *data["deployments"]}))
+    if data["builtin_prices"]:
+        data["pricing"] = {**_builtin_prices(data["providers"]), **data["pricing"]}
     return GatewayConfig.model_validate(data), keys
 
 

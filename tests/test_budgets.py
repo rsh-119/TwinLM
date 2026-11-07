@@ -99,10 +99,19 @@ def test_alerts_fire_once_per_threshold(client, auth, gateway, fake_providers, m
     assert [(a["threshold_pct"], a["spent_usd"]) for a in alerts] == [(100, 9.0), (80, 6.0)]
 
 
+def test_unpriced_model_is_refused_only_under_a_budget(client, auth, gateway, fake_providers):
+    gateway["services"] = build_services(pricing=PRICED)
+    headers = _key(client)
+    assert _chat(client, headers, model="groq/any-model").status_code == 200  # no budget: unchanged
+    client.put("/admin/budgets", json={"scope": "team", "target": "search", "limit_usd": 0.01}, headers=ADMIN)
+    refused = _chat(client, headers, model="groq/any-model")  # pinning an unpriced model can't dodge the budget
+    assert refused.status_code == 400 and "no price" in refused.json()["detail"]
+
+
 def test_worst_case_cost():
     targets = [("gemini", "gemini-flash-latest"), ("groq", "unpriced")]
     assert budgets.worst_case_cost(targets, PRICED, input_chars=7, max_output_tokens=2) == 3 + 4
-    assert budgets.worst_case_cost([("groq", "x")], PRICED, 100, 100) == 0.0  # unknown price: nothing reserved
+    assert budgets.worst_case_cost([("groq", "x")], PRICED, 100, 100) is None  # unknown price: no upper bound
     assert budgets.period_end("monthly", budgets.period_start("monthly")).day == 1
 
 
