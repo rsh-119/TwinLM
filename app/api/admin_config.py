@@ -3,10 +3,13 @@ model aliases and prices managed from the admin panel. Every write is
 validated by building the resulting config and router before it is
 committed, then applied immediately - no restart (app/gateway/runtime.py)."""
 import asyncio
+import ipaddress
 import json
 import re
+import socket
 import time
 from typing import List, Literal, Optional
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -20,6 +23,7 @@ from app.database.database import get_db
 from app.database.models import AliasOverride, PriceOverride, ProviderConfigRow
 from app.gateway import runtime, secret_box
 from app.gateway.config import Capability, ProviderConfig
+from app.gateway.model_prices import PRICES_AS_OF
 from app.gateway.presets import PRESETS, chat_models, recommended_model
 from app.providers.gemini import GEMINI_API_BASE
 from app.router.model_router import build_provider, get_model_router
@@ -90,6 +94,25 @@ def _commit_and_apply(db: Session, services: GatewayServices) -> None:
     runtime.announce()
 
 
+def _check_base_url(url: str) -> None:
+    """http(s) only, and never a link-local address (cloud metadata at
+    169.254.169.254 holds instance credentials). Private and loopback hosts
+    stay allowed: Ollama, vLLM and LM Studio run there."""
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise HTTPException(status_code=400, detail="base_url must be an http(s) URL")
+    try:
+        # ponytail: checked at save time only; DNS rebinding later is not covered
+        addresses = {info[4][0] for info in socket.getaddrinfo(parts.hostname, parts.port or 443)}
+    except (socket.gaierror, UnicodeError):
+        return  # unresolvable now: the provider simply fails until it resolves
+    for address in addresses:
+        ip = ipaddress.ip_address(address.split("%")[0])
+        ip = getattr(ip, "ipv4_mapped", None) or ip  # ::ffff:169.254.169.254
+        if ip.is_link_local or ip.is_unspecified:
+            raise HTTPException(status_code=400, detail="base_url points to a link-local address")
+
+
 def _resolve(preset: Optional[str], type_: Optional[str], base_url: Optional[str], model: Optional[str]):
     p = PRESETS.get(preset or "")
     if preset and p is None:
@@ -99,6 +122,8 @@ def _resolve(preset: Optional[str], type_: Optional[str], base_url: Optional[str
     model = model or (p["default_model"] if p else None)
     if type_ == "openai_compatible" and not base_url:
         raise HTTPException(status_code=400, detail="base_url is required for an OpenAI-compatible provider")
+    if base_url:
+        _check_base_url(base_url)
     if not model:
         raise HTTPException(status_code=400, detail="default_model is required")
     return p, type_, base_url, model
@@ -143,6 +168,15 @@ def list_providers(db: Session = Depends(get_db)) -> List[dict]:
                     "capabilities": json.loads(row.capabilities) if row.capabilities else None,
                     "enabled": row.enabled, "key_hint": row.key_hint, "timeout_seconds": row.timeout_seconds,
                     "health": _health(row.name)})
+    shown = {provider["name"] for provider in out}
+    config, _ = runtime.effective_config(db)
+    out.extend(
+        {"name": name, "source": "environment", "preset": name, "type": cfg.type, "base_url": cfg.base_url,
+         "default_model": cfg.default_model, "capabilities": cfg.capabilities, "enabled": cfg.enabled,
+         "key_hint": f"from {cfg.api_key_setting.upper()}", "timeout_seconds": cfg.timeout_seconds,
+         "health": _health(name)}
+        for name, cfg in config.providers.items() if name not in shown
+    )
     return out
 
 
@@ -182,6 +216,11 @@ async def update_provider(
         detail = "providers from gateway.toml are edited in the file" if name in runtime.base_config().providers \
             else "provider not found"
         raise HTTPException(status_code=404, detail=detail)
+    if body.base_url is not None and body.base_url != row.base_url:
+        _check_base_url(body.base_url)
+        if row.api_key_encrypted and not body.api_key:
+            # otherwise the stored key would be sent to the new host
+            raise HTTPException(status_code=400, detail="re-enter the API key when changing base_url")
     for field in ("base_url", "default_model", "timeout_seconds", "enabled"):
         value = getattr(body, field)
         if value is not None:
@@ -325,8 +364,14 @@ async def delete_alias(
 def list_prices(db: Session = Depends(get_db)) -> List[dict]:
     config, _ = runtime.effective_config(db)
     panel = {row.key for row in db.query(PriceOverride).all()}
-    return [{"key": key, "source": "panel" if key in panel else "gateway.toml", **price.model_dump()}
-            for key, price in sorted(config.pricing.items())]
+    toml = runtime.base_config().pricing
+
+    def origin(key: str) -> dict:
+        if key in panel:
+            return {"source": "panel"}
+        return {"source": "gateway.toml"} if key in toml else {"source": "built-in", "as_of": PRICES_AS_OF}
+
+    return [{"key": key, **origin(key), **price.model_dump()} for key, price in sorted(config.pricing.items())]
 
 
 @router.put("/prices")

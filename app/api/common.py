@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.auth import Principal
-from app.gateway.budgets import BudgetExceeded, BudgetTracker, RedisReservations
+from app.gateway.budgets import BudgetExceeded, BudgetTracker, RedisReservations, UnpricedModel
 from app.gateway.cache import ResponseCache, get_response_cache
 from app.gateway.config import GatewayConfig, get_gateway_config
 from app.gateway.guardrails import GuardrailEngine, get_guardrails
@@ -69,7 +69,7 @@ def admit(
     services: GatewayServices,
     db: Session,
     record: UsageRecord,
-    estimate: float = 0.0,
+    estimate: Optional[float] = 0.0,
 ) -> None:
     """Model allow-list, rate limits and budgets (key, team, user, org) for
     the caller; `estimate` is the request's worst-case cost, reserved
@@ -103,6 +103,11 @@ def admit(
         RATE_LIMITED.labels("budget").inc()
         record.fail(429, str(exc), "rate_limited")
         raise HTTPException(status_code=429, detail=str(exc))
+    except UnpricedModel:
+        record.fail(400, "unpriced model under a budget", "blocked")
+        raise HTTPException(status_code=400, detail=(
+            f"model {model!r} has no price in [pricing], so its spend can't count against "
+            "your budget; add a price or use a priced model"))
 
 
 def unavailable_detail(exc: Exception) -> str:

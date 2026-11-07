@@ -50,7 +50,10 @@ APIs it uses (`/auth`, `/console`, `/admin`, `/v1`) to signed-in people;
 `/metrics` and `/docs` are never proxied. Grafana sits behind HTTP basic
 auth over TLS (`console_password`, user `operator`).
 Keep `GATEWAY_BIND`, `GRAFANA_BIND`, `PROMETHEUS_BIND` on
-127.0.0.1. Without real DNS, the `*.localhost` defaults use Caddy's internal
+127.0.0.1. Compose sets `FORWARDED_ALLOW_IPS=*` so the gateway sees the
+client IP (login throttling) and HTTPS (Secure cookies) from Caddy; a client
+that reaches port 8000 directly could forge those headers, which is another
+reason to keep it private. Without real DNS, the `*.localhost` defaults use Caddy's internal
 CA for local testing.
 
 ## Schema migrations
@@ -132,6 +135,7 @@ so align backup retention with this policy.
 | Gateway API key | `POST /admin/keys/{id}/rotate` returns a new key with the same project, user, limits and budget. The old key keeps working until you revoke it (`DELETE /admin/keys/{id}`, or `?revoke_old=true` on rotate). |
 | Admin token | Write a new value to the `secrets` volume (`docker compose run --rm secrets sh -c 'rm /secrets/admin_token'` then `docker compose up -d secrets gateway`), update operators. |
 | Provider keys | Add the new key in the provider console, update `.env`, `docker compose up -d gateway`, then revoke the old key at the provider. Two credentials for one model can run side by side as two providers in one model group (`gateway.toml`). |
+| Provider-key secret (`PROVIDER_KEYS_SECRET`) | Set the new value, put the old one in `PROVIDER_KEYS_SECRET_PREVIOUS`, restart, run `python -m app.ops rotate-provider-keys`, then remove the old value. Use a random secret (`openssl rand -hex 32`). |
 | PostgreSQL password | `ALTER USER twinlm PASSWORD '...'` inside postgres, write the same value to `/secrets/postgres_password`, restart gateway. |
 | Console password | Delete `/secrets/console_password`, rerun `secrets`, restart `caddy`. |
 

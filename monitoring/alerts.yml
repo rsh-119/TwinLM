@@ -48,6 +48,13 @@ groups:
         annotations:
           summary: Usage batches failed to write to the database
 
+      - alert: TwinLMSharedStateDown
+        expr: llm_shared_state_up == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "Redis is down on {{ $labels.instance }}: rate limits and budgets are enforced per instance (N instances = up to N x the limits)"
+
       - alert: TwinLMUnpricedCalls
         expr: increase(llm_unpriced_calls_total[1h]) > 0
         labels: {severity: info}

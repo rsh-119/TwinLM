@@ -57,6 +57,10 @@ PROVIDER_HEALTH = Gauge(
 )
 ACTIVE_REQUESTS = Gauge("llm_active_requests", "In-flight gateway LLM requests")
 USAGE_BACKLOG = Gauge("llm_usage_backlog_rows", "Usage rows awaiting database persistence")
+SHARED_STATE_UP = Gauge(
+    "llm_shared_state_up",
+    "1 when Redis answers, 0 while it is down: rate limits and budget reservations are then per instance",
+)
 USAGE_DEADLETTER = Gauge("llm_usage_deadletter_rows", "Usage rows retained after data errors")
 USAGE_WRITE_FAILURES = Counter("llm_usage_write_failures_total", "Failed usage batch writes")
 GUARDRAIL_VIOLATIONS = Counter(

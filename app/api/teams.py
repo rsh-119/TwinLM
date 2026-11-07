@@ -21,8 +21,8 @@ from sqlalchemy.orm import Session
 from app.auth import DEFAULT_PROJECT, forget_key, generate_key, require_admin
 from app.config import get_settings
 from app.console_auth import (
-    ConsoleUser, clear_session_cookie, console_user, create_session, end_session, hash_password, ready_user,
-    set_session_cookie, temporary_password, verify_password,
+    ConsoleUser, clear_session_cookie, console_user, create_session, end_session, end_user_sessions, hash_password,
+    ready_user, set_session_cookie, temporary_password, verify_password,
 )
 from app.database import repository
 from app.database.database import get_db
@@ -223,6 +223,7 @@ def change_password(body: PasswordIn, current: ConsoleUser = Depends(console_use
         raise HTTPException(status_code=400, detail="current password is wrong")
     user.password_hash = hash_password(body.new_password)
     user.must_change_password = False
+    end_user_sessions(db, user.id, keep_token=current.token)
     db.commit()
     return {"changed": True}
 
@@ -287,6 +288,8 @@ def update_user(user_id: str, body: UserPatch, db: Session = Depends(get_db)) ->
         out["temporary_password"] = temporary_password()
         user.password_hash = hash_password(out["temporary_password"])
         user.must_change_password = True
+    if body.reset_password or body.disabled:
+        end_user_sessions(db, user.id)
     db.commit()
     return {**_user_view(user), **out}
 

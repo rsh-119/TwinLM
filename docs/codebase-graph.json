@@ -1,10 +1,10 @@
 {
  "schema": 1,
  "source": {
-  "revision": "80770a8b93f8a0d2add46d46fdbad40cc9f21286",
+  "revision": "6db844e9fc4c3e7a361e702ce24933767aaaf83a",
   "working_tree_dirty": true,
-  "fingerprint": "d3f801b9fc804782",
-  "updated_at": "2026-10-17T05:17:32Z"
+  "fingerprint": "dc6dd277b43c7987",
+  "updated_at": "2026-11-06T18:18:21Z"
  },
  "annotations": [
   {
@@ -770,6 +770,12 @@
    "purpose": "Catalog of popular providers (endpoint, models, capabilities) for the admin panel"
   },
   {
+   "id": "app.gateway.model_prices",
+   "kind": "module",
+   "path": "app/gateway/model_prices.py",
+   "purpose": "Built-in price snapshot for preset models, under gateway.toml and console prices"
+  },
+  {
    "id": "tests.test_runtime_config",
    "kind": "test",
    "path": "tests/test_runtime_config.py",
@@ -1220,14 +1226,6 @@
    "kind": "route",
    "path": "app/api/teams.py",
    "symbol": "setup",
-   "purpose": "",
-   "auto": true
-  },
-  {
-   "id": "route:POST /auth/signup",
-   "kind": "route",
-   "path": "app/api/teams.py",
-   "symbol": "signup",
    "purpose": "",
    "auto": true
   },
@@ -2400,13 +2398,6 @@
    "auto": true
   },
   {
-   "from": "route:POST /auth/signup",
-   "to": "app.api.teams",
-   "type": "routes_to",
-   "note": "signup",
-   "auto": true
-  },
-  {
    "from": "route:POST /console/teams/{team_id}/keys",
    "to": "app.api.teams",
    "type": "routes_to",
@@ -2598,6 +2589,12 @@
   {
    "from": "app.api.admin_config",
    "to": "app.gateway.config",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.api.admin_config",
+   "to": "app.gateway.model_prices",
    "type": "imports",
    "auto": true
   },
@@ -3251,6 +3248,24 @@
   },
   {
    "from": "app.gateway.runtime",
+   "to": "app.gateway.model_prices",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.runtime",
+   "to": "app.gateway.presets",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.runtime",
+   "to": "app.gateway.pricing",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.runtime",
    "to": "app.gateway.secret_box",
    "type": "imports",
    "auto": true
@@ -3282,6 +3297,12 @@
   {
    "from": "app.gateway.shared",
    "to": "app.gateway.cache",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.gateway.shared",
+   "to": "app.observability",
    "type": "imports",
    "auto": true
   },
@@ -3504,6 +3525,12 @@
   {
    "from": "app.ops",
    "to": "app.database.models",
+   "type": "imports",
+   "auto": true
+  },
+  {
+   "from": "app.ops",
+   "to": "app.gateway.secret_box",
    "type": "imports",
    "auto": true
   },

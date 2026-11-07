@@ -149,6 +149,10 @@ class GatewayConfig(_Strict):
     deployments: Dict[str, DeploymentConfig] = {}
     models: Dict[str, ModelAliasConfig] = {}
     pricing: Dict[str, PriceConfig] = {}
+    # false = only [pricing] and console prices (app/gateway/model_prices.py).
+    # Under a budget a priced model is callable, so turn this off when budgets
+    # are also what keeps users to the configured models (hosted beta).
+    builtin_prices: bool = True
     rate_limits: RateLimitConfig = RateLimitConfig()
     cache: CacheConfig = CacheConfig()
     guardrails: GuardrailsConfig = GuardrailsConfig()

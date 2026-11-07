@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.orm import Session
 
 from app import ops
 from app.database import database, models  # noqa: F401 - registers models
@@ -64,7 +65,7 @@ def test_upgrade_from_v1_preserves_data_and_is_repeatable(kind, tmp_path, monkey
 
         with pytest.raises(RuntimeError, match="python -m app.ops migrate"):
             database.init_db(apply=False)  # MIGRATE_ON_STARTUP=false refuses an old schema
-        assert database.init_db() == [2, 3, 4, 5]
+        assert database.init_db() == [2, 3, 4, 5, 6]
         assert database.init_db() == []
         database.init_db(apply=False)
 
@@ -81,7 +82,9 @@ def test_upgrade_from_v1_preserves_data_and_is_repeatable(kind, tmp_path, monkey
 def test_fresh_install_and_newer_schema_refusal(kind, tmp_path, monkeypatch):
     with _engine(kind, tmp_path) as engine:
         monkeypatch.setattr(database, "engine", engine)
-        assert database.init_db() == [1, 2, 3, 4, 5]
+        assert database.init_db() == [1, 2, 3, 4, 5, 6]
+        indexes = {i["name"] for i in inspect(engine).get_indexes("request_logs")}
+        assert {"ix_request_logs_key_created", "ix_request_logs_project_created", "ix_request_logs_user_created"} <= indexes
         with engine.begin() as conn:
             conn.execute(text("INSERT INTO schema_migrations (version) VALUES (999)"))
         with pytest.raises(RuntimeError, match="newer than this gateway"):
@@ -106,6 +109,29 @@ def test_retention_and_verify(tmp_path, monkeypatch, capsys):
     assert ops.main(["verify"]) == 0
     report = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert (report["conversations"], report["messages"], report["schema_version"]) == (1, 1, database.SCHEMA_VERSION)
+    engine.dispose()
+
+
+def test_rotate_provider_keys(tmp_path, settings, monkeypatch, capsys):
+    from app.database.models import ProviderConfigRow
+    from app.gateway import secret_box
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'db.sqlite'}")
+    monkeypatch.setattr(database, "engine", engine)
+    database.init_db()
+    monkeypatch.setattr(settings, "provider_keys_secret", "old-secret")
+    with Session(engine) as db:
+        db.add(ProviderConfigRow(name="p", type="mock", default_model="m", api_key_encrypted=secret_box.encrypt("sk-1")))
+        db.commit()
+
+    monkeypatch.setattr(settings, "provider_keys_secret", "new-secret")
+    assert ops.main(["rotate-provider-keys"]) == 1  # old secret not given: nothing changes
+    monkeypatch.setattr(settings, "provider_keys_secret_previous", "old-secret")
+    assert ops.main(["rotate-provider-keys"]) == 0
+    monkeypatch.setattr(settings, "provider_keys_secret_previous", "")
+    with engine.connect() as conn:
+        stored = conn.execute(text("SELECT api_key_encrypted FROM provider_configs")).scalar()
+    assert secret_box.decrypt(stored) == "sk-1"  # the new secret alone reads it
     engine.dispose()
 
 

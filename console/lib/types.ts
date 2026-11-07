@@ -151,7 +151,7 @@ export interface Preset {
 
 export interface ProviderRow {
   name: string;
-  source: "gateway.toml" | "panel";
+  source: "gateway.toml" | "panel" | "environment";
   preset: string | null;
   type: string;
   base_url: string | null;
@@ -185,7 +185,8 @@ export interface AliasRow {
 
 export interface PriceRow {
   key: string;
-  source: "gateway.toml" | "panel";
+  source: "gateway.toml" | "panel" | "built-in";
+  as_of?: string;
   input_per_million: number;
   output_per_million: number;
 }

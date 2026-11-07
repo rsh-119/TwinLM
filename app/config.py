@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # keyless providers. Or a file holding it (PROVIDER_KEYS_SECRET_FILE).
     provider_keys_secret: str = ""
     provider_keys_secret_file: str = ""
+    # The secret being replaced: still decrypts, until
+    # `python -m app.ops rotate-provider-keys` re-encrypts every stored key.
+    provider_keys_secret_previous: str = ""
     # false = refuse to start on an outdated schema instead of migrating it
     migrate_on_startup: bool = True
     # Persistent PostgreSQL connections. Too small a pool makes every

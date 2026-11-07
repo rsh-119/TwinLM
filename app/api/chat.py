@@ -93,7 +93,8 @@ async def _complete(
     _reject_unsupported(body)
     _check_request_metadata(body, services, record)
     validator, json_mode = _structured_output(body)
-    admit(body.model, principal, services, db, record, _estimate(body, model_router, services))
+    # budget SUMs and Redis calls are blocking: keep them off the event loop
+    await asyncio.to_thread(admit, body.model, principal, services, db, record, _estimate(body, model_router, services))
 
     manager, conversation, user_message, messages = _prepare_turn(body, db, principal, services, record)
     params = _checked_generation_params(body, services, record)
@@ -409,7 +410,8 @@ async def stream_chat_turn(
         _reject_unsupported(body)
         _check_request_metadata(body, services, record)
         _structured_output(body)
-        admit(body.model, principal, services, db, record, _estimate(body, model_router, services))
+        await asyncio.to_thread(admit, body.model, principal, services, db, record,
+                                _estimate(body, model_router, services))
         manager, conversation, user_message, messages = _prepare_turn(body, db, principal, services, record)
 
         collected: List[str] = []
@@ -559,7 +561,7 @@ def _check_request_metadata(body: ChatCompletionRequest, services: GatewayServic
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-def _estimate(body: ChatCompletionRequest, model_router: ModelRouter, services: GatewayServices) -> float:
+def _estimate(body: ChatCompletionRequest, model_router: ModelRouter, services: GatewayServices) -> Optional[float]:
     """Worst-case cost reserved against budgets while the request runs."""
     try:
         targets = model_router.resolve(body.model)

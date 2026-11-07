@@ -26,6 +26,7 @@ from redis.retry import Retry
 
 from app.config import get_settings
 from app.gateway.cache import ResponseCache
+from app.observability import SHARED_STATE_UP
 from app.providers.base import TokenUsage
 from app.router.model_router import RouteResult
 
@@ -50,10 +51,13 @@ class FailFastRedis(redis.Redis):
         if time.monotonic() < self.down_until:
             raise redis.ConnectionError("redis marked down")
         try:
-            return super().execute_command(*args, **options)
+            result = super().execute_command(*args, **options)
         except (redis.ConnectionError, redis.TimeoutError):
             self.down_until = time.monotonic() + DOWN_SECONDS
+            SHARED_STATE_UP.set(0)
             raise
+        SHARED_STATE_UP.set(1)
+        return result
 
 
 def connect(url: str) -> FailFastRedis:

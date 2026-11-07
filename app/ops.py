@@ -6,6 +6,7 @@ DATABASE_URL / USAGE_SPOOL_PATH):
     python -m app.ops retention --request-logs-days 90 --conversations-days 365 [--memories-days N] [--dry-run]
     python -m app.ops outbox status|list|reconcile|requeue|export FILE
     python -m app.ops create-admin --email you@company.com --name "Your Name"   first console admin
+    python -m app.ops rotate-provider-keys    re-encrypt stored provider keys after changing PROVIDER_KEYS_SECRET
 
 Procedures that use these are in docs/OPERATIONS.md.
 """
@@ -16,6 +17,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import database
@@ -128,6 +130,25 @@ def create_admin(email: str, name: str) -> int:
     return 0
 
 
+def rotate_provider_keys() -> int:
+    """Re-encrypt every stored provider key with PROVIDER_KEYS_SECRET; the
+    old secret is PROVIDER_KEYS_SECRET_PREVIOUS. All rows or none."""
+    from app.database.models import ProviderConfigRow
+    from app.gateway import secret_box
+
+    with Session(database.engine) as db:
+        rows = db.query(ProviderConfigRow).filter(ProviderConfigRow.api_key_encrypted.isnot(None)).all()
+        try:
+            for row in rows:
+                row.api_key_encrypted = secret_box.rotate(row.api_key_encrypted)
+        except secret_box.SecretUnavailable as exc:
+            print(f"nothing changed: {exc}", file=sys.stderr)
+            return 1
+        db.commit()
+    print(f"re-encrypted {len(rows)} provider key(s); PROVIDER_KEYS_SECRET_PREVIOUS can be removed")
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.ops", description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
@@ -144,6 +165,7 @@ def main(argv=None) -> int:
     admin_cmd = commands.add_parser("create-admin")
     admin_cmd.add_argument("--email", required=True)
     admin_cmd.add_argument("--name", default="Admin")
+    commands.add_parser("rotate-provider-keys")
     args = parser.parse_args(argv)
 
     if args.command == "migrate":
@@ -152,6 +174,8 @@ def main(argv=None) -> int:
         return verify()
     if args.command == "create-admin":
         return create_admin(args.email, args.name)
+    if args.command == "rotate-provider-keys":
+        return rotate_provider_keys()
     if args.command == "retention":
         days = (args.request_logs_days, args.conversations_days, args.memories_days)
         if any(d is not None and d < 1 for d in days):
