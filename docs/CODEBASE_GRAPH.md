@@ -93,6 +93,7 @@ sequenceDiagram
 | Several instances (Redis shared state) | `app/gateway/shared.py`, `RedisReservations` in `budgets.py`, `forget_key` in `app/auth.py`, `announce`/`follow` in `app/gateway/runtime.py` | `test_shared_state.py` |
 | Output caps, cache eligibility/TTL | `app/gateway/config.py` (`output_cap`, `cache_ttl`), `app/api/chat.py` (`_checked_generation_params`, `_complete`) | `test_cost_controls.py` |
 | Providers/aliases/prices from the admin panel (runtime, no restart) | `app/api/admin_config.py`, `app/gateway/runtime.py` (`effective_config`, `apply`), `app/gateway/secret_box.py`, `app/gateway/presets.py`, `swap_router` in `model_router.py`; console pages `console/app/(app)/providers`, `models` | `test_runtime_config.py` |
+| Hosted beta sign-up (`SIGNUP_*`), account cap, key-limit clamp | `signup`, `_beta_full`, `_at_most` in `app/api/teams.py`; console sign-in page; `deploy/render-beta.yaml`, `deploy/gateway.beta.toml` | `test_signup.py` |
 | Console sign-in, people, teams, roles, team keys | `app/console_auth.py`, `app/api/teams.py`, `require_admin` in `app/auth.py` (accepts admin sessions); console Teams/People tabs | `test_teams.py` |
 | Web console (Next.js at /app) | `console/` (pages in `console/app/(app)/`, API client `console/lib/api.ts`), served by `app/main.py` (`CONSOLE_DIR`), cookie auth in `app/console_auth.py` | `test_console_web.py`, `console/e2e/` |
 | Savings report | `app/api/admin.py` (`savings`), `app/database/repository.py` (`savings_rows`) | `test_cost_controls.py` |

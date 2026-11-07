@@ -399,7 +399,9 @@ function Usage({ team }: { team: TeamSummary }) {
 }
 
 function TeamView() {
-  const id = useSearchParams().get("id") ?? "";
+  const params = useSearchParams();
+  const id = params.get("id") ?? "";
+  const tab = params.get("tab");
   const teams = useTeams();
   const team = teams.data?.find((t) => t.id === id);
   if (teams.isLoading) return <RowsSkeleton />;
@@ -414,7 +416,7 @@ function TeamView() {
       <PageHeader title={team.name} description={`${plural(team.members, "member")} · ${plural(team.active_keys, "active key")} · ${usd(team.spend_30d_usd)} in the last 30 days`}>
         <RoleBadge role={team.my_role} />
       </PageHeader>
-      <Tabs defaultValue="members">
+      <Tabs defaultValue={tab === "keys" || tab === "usage" ? tab : "members"}>
         <TabsList>
           <TabsTrigger value="members">Members</TabsTrigger>
           <TabsTrigger value="keys">Keys</TabsTrigger>

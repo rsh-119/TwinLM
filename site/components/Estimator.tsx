@@ -2,6 +2,7 @@
 
 import { useId, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
+import { TRY_URL } from "@/components/SiteHeader";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const LIVE_FROM = 3; // TwinLM switched on in April of the illustrated year
@@ -145,13 +146,19 @@ export default function Estimator() {
         </p>
 
         <div className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-4">
-          <a href="#deploy"
+          <a href={TRY_URL ?? "#deploy"}
             className="label inline-flex h-12 items-center bg-ink px-6 text-base text-paper transition-colors hover:bg-signal hover:text-on-signal">
-            Deploy in 5 minutes
+            {TRY_URL ? "Try it free" : "Deploy in 5 minutes"}
           </a>
-          <a href="#integrate" className="label text-base underline">
-            See the two-line integration
-          </a>
+          {TRY_URL ? (
+            <a href="#deploy" className="label text-base underline">
+              Or self-host in 5 minutes
+            </a>
+          ) : (
+            <a href="#integrate" className="label text-base underline">
+              See the two-line integration
+            </a>
+          )}
         </div>
       </div>
 

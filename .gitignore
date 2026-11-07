@@ -13,3 +13,5 @@ htmlcov/
 backups/
 # design tool working files (impeccable)
 .impeccable/
+# Claude Code worktrees
+.claude/worktrees/

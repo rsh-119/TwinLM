@@ -37,6 +37,7 @@ jobs:
       - run: npm run build   # static export to site/out
         env:
           PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          NEXT_PUBLIC_BETA_URL: ${{ vars.BETA_URL }}   # hosted beta (docs/HOSTED_BETA.md); unset = no "Try it free"
       - uses: actions/upload-pages-artifact@v5
         with:
           path: site/out
